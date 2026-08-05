@@ -142,6 +142,47 @@ body::before{
 .input-prefix .unit{position:absolute;right:0.7rem;top:50%;transform:translateY(-50%);font-size:0.75rem;color:var(--muted-light);pointer-events:none}
 .form-hint{font-size:0.7rem;color:var(--muted-light);margin-top:1px}
 
+/* Multi-select */
+.multi-select{position:relative;user-select:none}
+.multi-select-trigger{
+  display:flex;align-items:center;justify-content:space-between;gap:0.5rem;
+  padding:0.55rem 0.7rem;font-size:0.86rem;font-family:inherit;
+  color:var(--ink);background:rgba(255,255,255,0.7);
+  border:1px solid var(--rule-strong);border-radius:var(--radius-sm);
+  cursor:pointer;transition:border-color .2s,box-shadow .2s,background .2s;
+  min-height:2.3rem;
+}
+.multi-select-trigger:hover{border-color:var(--accent)}
+.multi-select.open .multi-select-trigger{
+  border-color:var(--accent);box-shadow:0 0 0 3px rgba(2,132,199,0.12);background:#fff;
+}
+.multi-select-placeholder{color:var(--muted-light)}
+.multi-select-tags{display:flex;flex-wrap:wrap;gap:0.3rem}
+.ms-tag{
+  display:inline-flex;align-items:center;gap:0.25rem;
+  padding:1px 7px;font-size:0.72rem;font-weight:600;
+  background:rgba(2,132,199,0.08);color:var(--accent);
+  border-radius:4px;line-height:1.7;
+}
+.ms-tag .ms-tag-x{font-size:0.85rem;cursor:pointer;opacity:0.6;line-height:1}
+.ms-tag .ms-tag-x:hover{opacity:1}
+.ms-arrow{width:14px;height:14px;color:var(--muted);flex-shrink:0;transition:transform .2s}
+.multi-select.open .ms-arrow{transform:rotate(180deg)}
+.multi-select-dropdown{
+  position:absolute;top:100%;left:0;right:0;z-index:50;
+  background:var(--surface-solid);border:1px solid var(--rule-strong);
+  border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);
+  margin-top:4px;display:none;max-height:200px;overflow-y:auto;
+}
+.multi-select.open .multi-select-dropdown{display:block}
+.ms-option{
+  display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.8rem;
+  font-size:0.84rem;cursor:pointer;transition:background .15s;
+}
+.ms-option:hover{background:rgba(2,132,199,0.05)}
+.ms-option input[type="checkbox"]{accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
+.ms-option.selected{background:rgba(2,132,199,0.06);font-weight:600}
+
 .form-divider{height:1px;background:var(--rule);margin:1rem 0}
 .advanced-toggle{
   display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;font-weight:600;
@@ -282,6 +323,37 @@ body::before{
 .cost-table tr.total td{padding-top:0.7rem;font-size:0.92rem;font-weight:700;border-top:2px solid var(--rule-strong);border-bottom:none}
 .cost-table tr.total td:first-child{color:var(--ink)}
 .cost-table tr.total td:last-child{color:var(--accent);font-size:1.15rem}
+.cost-table thead th{font-size:0.74rem;font-weight:700;color:var(--muted);text-align:left;padding:0.5rem 0;border-bottom:1px solid var(--rule)}
+.cost-table thead th:last-child{text-align:right}
+.cost-item-name{font-weight:600;color:var(--ink);font-size:0.82rem}
+.cost-item-basis{font-size:0.68rem;color:var(--muted);margin-top:2px}
+.cost-item-amount{font-family:'GeistMono';font-weight:600;text-align:right}
+.cost-item-amount .cost-item-usd{font-size:0.7rem;color:var(--muted);font-weight:400}
+.cost-item-usd{font-size:0.72rem;color:var(--muted)}
+.calc-details{margin-top:0.8rem;background:var(--surface-2);border-radius:var(--radius-sm);padding:0.7rem 0.9rem;border:1px solid var(--rule)}
+.calc-details summary{cursor:pointer;font-size:0.78rem;font-weight:600;color:var(--accent);user-select:none}
+.calc-details summary:hover{color:var(--accent-dark)}
+.calc-details-body{margin-top:0.6rem;padding-top:0.5rem;border-top:1px dashed var(--rule);font-size:0.76rem}
+.calc-details-title{font-weight:600;color:var(--ink-soft);margin-bottom:0.3rem}
+.calc-detail-item{color:var(--ink-soft);padding:0.15rem 0;font-family:'GeistMono';font-size:0.72rem}
+.calc-details-note{margin-top:0.5rem;padding-top:0.4rem;border-top:1px dashed var(--rule);color:var(--muted);font-size:0.7rem}
+
+/* Carrier & Shipping */
+.carrier-shipping-section{margin-bottom:1.2rem}
+.cs-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media(max-width:768px){.cs-grid{grid-template-columns:1fr}}
+.cs-card{background:var(--surface-solid);border:1px solid var(--rule);border-radius:var(--radius-md);padding:1.1rem}
+.cs-card-header{font-size:0.88rem;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:0.4rem;margin-bottom:0.7rem}
+.cs-card-header svg{width:16px;height:16px;color:var(--accent)}
+.cs-card-body{display:flex;flex-direction:column;gap:0.5rem}
+.cs-primary{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap}
+.cs-name{font-size:0.9rem;font-weight:600;color:var(--ink)}
+.cs-tag{font-size:0.7rem;font-weight:600;padding:0.15rem 0.5rem;border-radius:10px;white-space:nowrap}
+.cs-meta{display:flex;gap:0.8rem;flex-wrap:wrap;font-size:0.76rem;color:var(--muted)}
+.cs-advantage{font-size:0.78rem;color:var(--ink-soft);line-height:1.4}
+.cs-alts{display:flex;flex-direction:column;gap:0.3rem;margin-top:0.3rem}
+.cs-alts-label{font-size:0.74rem;color:var(--muted)}
+.cs-alt-tag{display:inline-block;font-size:0.72rem;color:var(--ink-soft);background:var(--surface-2);padding:0.2rem 0.5rem;border-radius:6px;margin-right:0.3rem;margin-bottom:0.2rem}
 
 /* Timeline */
 .timeline-section{
@@ -399,6 +471,11 @@ body::before{
     <div class="panel-body">
       <form id="logisticsForm" autocomplete="off">
         <div class="form-grid">
+
+          <div class="form-group full">
+            <label class="form-label">订单编号 <span class="req">*</span></label>
+            <input type="text" class="form-input" id="orderNumber" placeholder="请输入订单编号，如 PO-2024-001" value="">
+          </div>
 
           <div class="form-group full">
             <label class="form-label">客户名称 <span class="req">*</span></label>
