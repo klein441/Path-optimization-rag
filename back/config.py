@@ -101,6 +101,121 @@ NORTH_AMERICA = ["美国", "加拿大", "墨西哥"]
 # ===== FDA要求国家 =====
 FDA_COUNTRIES = ["美国"]
 
+# ===== Freightos API 港口编码映射 =====
+# 系统内部港口名称 -> Freightos API 的 UN/LOCODE/港口代码
+# 参考: https://developers.freightos.com/docs/location-codes
+FREIGHTOS_PORT_MAP = {
+    # 中国港口
+    "上海/SHANGHAI": "CNSHA",
+    "上海": "CNSHA",
+    "SHANGHAI": "CNSHA",
+    "青岛/QINGDAO": "CNQIN",
+    "青岛": "CNQIN",
+    "QINGDAO": "CNQIN",
+    "宁波/NINGBO": "CNNGB",
+    "宁波": "CNNGB",
+    "NINGBO": "CNNGB",
+    "深圳/SHENZHEN": "CNSZN",
+    "深圳": "CNSZN",
+    "SHENZHEN": "CNSZN",
+    "天津/TAINJIN": "CNTSN",
+    "天津": "CNTSN",
+    "TAINJIN": "CNTSN",
+    "厦门/XIAMEN": "CNXMN",
+    "厦门": "CNXMN",
+    "XIAMEN": "CNXMN",
+    "大连/DALIAN": "CNDLC",
+    "大连": "CNDLC",
+    "DALIAN": "CNDLC",
+    "连云港/LIANYUNGANG": "CNLYG",
+    "连云港": "CNLYG",
+    "LIANYUNGANG": "CNLYG",
+    "广州/GUANGZHOU": "CNGZH",
+    "广州": "CNGZH",
+    "GUANGZHOU": "CNGZH",
+    "珠海/ZHUHAI": "CNZHI",
+    "珠海": "CNZHI",
+    "ZHUHAI": "CNZHI",
+    "福州/FUZHOU": "CNFOC",
+    "福州": "CNFOC",
+    "FUZHOU": "CNFOC",
+    "南京/NANJING": "CNNJG",
+    "南京": "CNNJG",
+    "NANJING": "CNNJG",
+    "营口/YINGKOU": "CNYKH",
+    "营口": "CNYKH",
+    "YINGKOU": "CNYKH",
+    # 海外港口
+    "海防/HAIPHONG": "VNHPH",
+    "海防": "VNHPH",
+    "HAIPHONG": "VNHPH",
+    "勿拉湾/BELAWAN": "IDBLW",
+    "勿拉湾": "IDBLW",
+    "BELAWAN": "IDBLW",
+    "巴生港/PORT KLANG": "MYPKG",
+    "巴生港": "MYPKG",
+    "PORT KLANG": "MYPKG",
+    "SINGAPORE": "SGSIN",
+    "新加坡": "SGSIN",
+    "鹿特丹/ROTTERDAM": "NLRTM",
+    "鹿特丹": "NLRTM",
+    "ROTTERDAM": "NLRTM",
+    "洛杉矶/LOS ANGELES": "USLAX",
+    "洛杉矶": "USLAX",
+    "LOS ANGELES": "USLAX",
+    "纽约/NEW YORK": "USNYC",
+    "纽约": "USNYC",
+    "NEW YORK": "USNYC",
+    "长滩/LONG BEACH": "USLGB",
+    "长滩": "USLGB",
+    "LONG BEACH": "USLGB",
+    "汉堡/HAMBURG": "DEHAM",
+    "汉堡": "DEHAM",
+    "HAMBURG": "DEHAM",
+    "安特卫普/ANTWERP": "BEANR",
+    "安特卫普": "BEANR",
+    "ANTWERP": "BEANR",
+    "洛杉矶/LAX": "USLAX",
+    # 日本
+    "东京/TOKYO": "JPTYO",
+    "东京": "JPTYO",
+    "TOKYO": "JPTYO",
+    "大阪/OSAKA": "JPOSA",
+    "大阪": "JPOSA",
+    "OSAKA": "JPOSA",
+    "神户/KOBE": "JPUKB",
+    "神户": "JPUKB",
+    "KOBE": "JPUKB",
+    # 韩国
+    "釜山/BUSAN": "KRPUS",
+    "釜山": "KRPUS",
+    "BUSAN": "KRPUS",
+    # 澳洲
+    "悉尼/SYDNEY": "AUSYD",
+    "悉尼": "AUSYD",
+    "SYDNEY": "AUSYD",
+    "墨尔本/MELBOURNE": "AUMEL",
+    "墨尔本": "AUMEL",
+    "MELBOURNE": "AUMEL",
+    # 迪拜
+    "迪拜/DUBAI": "AEDXB",
+    "迪拜": "AEDXB",
+    "DUBAI": "AEDXB",
+}
+
+# Freightos 集装箱类型映射
+FREIGHTOS_BOX_MAP = {
+    "20GP": "container20",
+    "40GP": "container40",
+    "40HQ": "container40hc",
+    "45HQ": "container45hc",
+    "20RF": "reefer20",
+    "40RF": "reefer40",
+}
+
+# 默认回退港口
+FREIGHTOS_FALLBACK_PORT = "CNSHA"  # 默认上海
+
 # ===== 集装箱箱型标准容量（CBM） =====
 BOX_TYPE_VOLUME = {
     "20GP": 33.1,

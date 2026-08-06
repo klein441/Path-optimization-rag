@@ -618,3 +618,66 @@ class KnowledgeBase:
         if info["lines"]:
             return info["lines"][0]
         return None
+
+    def get_cheapest_shipping_line(self, country, max_transit_days=None):
+        """
+        获取最便宜的船公司（在满足时效要求的船公司中选最优价格）
+
+        策略：
+        1. 如果提供 max_transit_days，只保留 transit_days <= max_transit_days 的船公司
+        2. 在符合条件的船公司中，优先选 advantage 字段含"价格"关键字的
+        3. 如果多个含价格优势，选 transit_days 最短的（时效越短通常越便宜）
+        4. 如果都不含价格优势，选 transit_days 最短的（时效=成本代理指标）
+
+        :param country: 运抵国
+        :param max_transit_days: 最大可接受转运天数（None=不限）
+        :return: dict with 'recommended', 'available', 'region', 'filtered_count', 'total_count'
+        """
+        info = self.get_shipping_lines(country)
+        all_lines = info["lines"] if info else []
+        region = info["region"] if info else "未知"
+
+        if not all_lines:
+            return {
+                "recommended": None,
+                "available": [],
+                "region": region,
+                "filtered_count": 0,
+                "total_count": 0,
+            }
+
+        total_count = len(all_lines)
+
+        # 1. 按时效过滤
+        if max_transit_days is not None:
+            feasible = [l for l in all_lines if l["transit_days"] <= max_transit_days]
+            # 如果全部超时，放宽到所有船公司中选最快的（紧急情况）
+            if not feasible:
+                feasible = [min(all_lines, key=lambda x: x["transit_days"])]
+        else:
+            feasible = all_lines
+
+        filtered_count = len(feasible)
+
+        # 2. 在符合条件的船公司中，按价格优先级排序
+        def price_score(line):
+            adv = line.get("advantage", "")
+            # 含"价格"关键字 → 高优先级
+            if "价格" in adv:
+                return (0, line["transit_days"])
+            # 含"优势"、"优" → 中优先级
+            if "优势" in adv or "优" in adv:
+                return (1, line["transit_days"])
+            # 其他 → 默认优先级，按 transit_days
+            return (2, line["transit_days"])
+
+        sorted_by_price = sorted(feasible, key=price_score)
+
+        return {
+            "recommended": sorted_by_price[0],
+            "available": sorted_by_price,
+            "region": region,
+            "filtered_count": filtered_count,
+            "total_count": total_count,
+            "selection_mode": "cheapest_feasible" if max_transit_days else "cheapest_overall",
+        }
