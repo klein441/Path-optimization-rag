@@ -63,13 +63,20 @@ class LLMClient:
             dest_port = self.kb.get_best_dest_port(dest_country) or dest_country + "主港"
             # 确定贸易条款
             trade_term = self.kb.get_best_trade_term(dest_country)
-            # 确定箱型
+            # 确定箱型（支持多箱型）
             volume = float(input_data.get("volume", 0) or 0)
             weight = float(input_data.get("weight", 0) or 0)
-            box_type = self.cost_calc.suggest_box_type(volume, weight)
+            box_type_counts = input_data.get("boxTypeCounts", None)
+            if box_type_counts and isinstance(box_type_counts, dict) and len(box_type_counts) > 0:
+                # 多箱型模式：使用用户指定的各箱型数量
+                box_type = list(box_type_counts.keys())[0]  # 主箱型
+            else:
+                box_type = self.cost_calc.suggest_box_type(volume, weight)
+                box_type_counts = None
 
             # 计算费用
-            cost = self.cost_calc.calculate(input_data, factory_name, origin_port, dest_port, trade_term, box_type)
+            cost = self.cost_calc.calculate(input_data, factory_name, origin_port, dest_port, trade_term,
+                                            box_type, box_type_counts=box_type_counts if box_type_counts and len(box_type_counts) > 1 else None)
 
             # 计算时间线
             timeline = self._calculate_timeline(input_data, factory_name, dest_country)
@@ -249,6 +256,9 @@ class LLMClient:
                 "tradeTerm": primary["trade_term"],
                 "tradeTermInfo": self.kb.trade_terms.get(primary["trade_term"], {}),
                 "boxType": primary["box_type"],
+                "boxTypes": primary["cost"].get("box_types", [primary["box_type"]]),
+                "boxTypeCounts": primary["cost"].get("box_type_counts", {primary["box_type"]: 1}),
+                "boxCount": primary["cost"].get("box_count", 1),
                 "cost": primary["cost"],
                 "timeline": primary["timeline"],
                 "factoryInfo": primary["factory_info"],
@@ -524,3 +534,105 @@ class LLMClient:
         result["llm_model"] = LLM_MODEL
 
         return result
+
+    def estimate_toll_fee(self, province, origin_port, box_count, box_types, weight, volume):
+        """调用LLM估算工厂自运高速费
+
+        :param province: 工厂所在省份
+        :param origin_port: 始发港
+        :param box_count: 总箱数
+        :param box_types: 箱型列表
+        :param weight: 总重量(kg)
+        :param volume: 总容积(m³)
+        :return: 高速费估算（元）
+        """
+        if not LLM_ENABLED:
+            # LLM不可用时回退到规则估算
+            return self._rule_toll_fee(province, origin_port, box_count)
+
+        prompt = f"""你是一位中国物流运输成本专家。请根据以下信息，估算工厂自运货物到港口的高速公路通行费。
+
+## 运输信息
+- 工厂所在省份：{province}
+- 始发港：{origin_port}
+- 总箱数：{box_count} 个集装箱
+- 箱型：{', '.join(box_types) if isinstance(box_types, list) else str(box_types)}
+- 总重量：{weight} kg
+- 总体积：{volume} m³
+
+## 计算要求
+中国高速公路货车通行费标准：约 1.5-2.5 元/公里（根据省份和路段不同）。
+请综合考虑以下因素：
+1. 从{province}到{origin_port}的典型高速公路距离
+2. 需要多少辆集装箱卡车（每辆约装1-2个40尺柜或2-3个20尺柜）
+3. 各省高速公路费率差异（长三角约1.8元/km，山东约1.6元/km，中西部约2.0元/km）
+4. 桥梁/隧道附加费（如有）
+
+请输出一个JSON，格式严格如下，只返回JSON不要其他文字：
+{{"distance_km": 450, "trucks": 3, "toll_per_km": 1.8, "bridge_tunnel_fee": 80, "total_toll": 2510, "reasoning": "安徽到上海约450km高速..."}}"""
+
+        try:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {LLM_API_KEY}",
+            }
+            payload = {
+                "model": LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": "你是中国物流运输成本专家，擅长精确计算高速公路通行费。请严格按JSON格式输出结果。"},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 500,
+            }
+
+            resp = requests.post(LLM_API_URL, json=payload, headers=headers, timeout=LLM_TIMEOUT)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+
+            # 解析LLM返回的JSON
+            try:
+                result = json.loads(content)
+            except:
+                match = re.search(r'\{.*\}', content, re.DOTALL)
+                if match:
+                    result = json.loads(match.group())
+                else:
+                    return self._rule_toll_fee(province, origin_port, box_count)
+
+            total = int(float(result.get("total_toll", 0)))
+            if total <= 0:
+                return self._rule_toll_fee(province, origin_port, box_count)
+
+            print(f"[LLM高速费] {province}→{origin_port}, {box_count}箱, "
+                  f"距离={result.get('distance_km')}km, 卡车={result.get('trucks')}辆, "
+                  f"高速费=¥{total}, 理由: {result.get('reasoning', '')[:80]}")
+            return total
+
+        except Exception as e:
+            print(f"[LLM高速费] 调用失败，回退规则引擎: {e}")
+            return self._rule_toll_fee(province, origin_port, box_count)
+
+    def _rule_toll_fee(self, province, origin_port, box_count):
+        """规则引擎估算高速费（LLM不可用时的回退）"""
+        province_toll_rates = {
+            '山东': {'上海/SHANGHAI': (550, 1.6), '青岛/QINGDAO': (280, 1.6)},
+            '安徽': {'上海/SHANGHAI': (420, 1.8), '青岛/QINGDAO': (580, 1.7)},
+            '江西': {'上海/SHANGHAI': (620, 2.0), '青岛/QINGDAO': (850, 1.9)},
+            '江苏': {'上海/SHANGHAI': (280, 1.8), '青岛/QINGDAO': (450, 1.7)},
+            '上海': {'上海/SHANGHAI': (80, 1.8)},
+            '越南': {'海防/HAIPHONG': (120, 0)},
+            '印尼': {'勿拉湾/BELAWAN': (150, 0)},
+        }
+
+        default = (400, 1.8)
+        prov_rates = province_toll_rates.get(province, {})
+        distance, toll_rate = prov_rates.get(origin_port, default)
+
+        # 估算卡车数量
+        trucks = max(1, round(box_count / 2.5))
+        total = round(distance * toll_rate + distance * 0.5) * trucks
+        print(f"[规则高速费] {province}→{origin_port}, {box_count}箱, "
+              f"距离={distance}km, 卡车={trucks}辆, 高速费≈¥{total}")
+        return total

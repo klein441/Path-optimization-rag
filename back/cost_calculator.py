@@ -77,7 +77,7 @@ class CostCalculator:
                     if len(vals) >= 5:
                         self.shipping_rates[col] = float(np.median(vals))
 
-    def calculate(self, input_data, factory_name, origin_port, dest_port, trade_term, box_type="40HQ"):
+    def calculate(self, input_data, factory_name, origin_port, dest_port, trade_term, box_type="40HQ", box_type_counts=None):
         """
         基于真实数据动态计算费用
         :param input_data: 用户输入 (productType, destCountry, boxCount, weight, volume, cargoReady, shipSchedule)
@@ -85,7 +85,8 @@ class CostCalculator:
         :param origin_port: 始发港
         :param dest_port: 目的港
         :param trade_term: 贸易条款
-        :param box_type: 集装箱箱型
+        :param box_type: 集装箱箱型（单箱型时的默认值）
+        :param box_type_counts: 各箱型数量字典，如 {"40HQ": 5, "20GP": 3}（可选，支持多箱型）
         :return: 费用明细字典
         """
         dest_country = input_data.get("destCountry", "")
@@ -93,8 +94,18 @@ class CostCalculator:
         weight = float(input_data.get("weight", 0) or 0)
         box_count = max(1, int(float(input_data.get("boxCount", 1) or 1)))
 
-        # 估算实际需要的集装箱数量
-        actual_boxes = self._estimate_actual_boxes(volume, box_count, box_type)
+        # 判断是否为多箱型模式
+        is_multi_box = box_type_counts and len(box_type_counts) > 1
+        if is_multi_box:
+            # 多箱型：总箱数=各箱型数量之和
+            actual_boxes = sum(box_type_counts.values())
+            # 使用第一个箱型作为默认箱型（用于陆运费、港杂费等按箱计算的费用）
+            primary_box_type = list(box_type_counts.keys())[0]
+        else:
+            # 单箱型：原有逻辑
+            actual_boxes = self._estimate_actual_boxes(volume, box_count, box_type)
+            primary_box_type = box_type
+            box_type_counts = {box_type: actual_boxes}
 
         # 获取该运抵国的历史费用统计
         country_fees = self.kb.get_fee_breakdown(dest_country)
@@ -155,8 +166,8 @@ class CostCalculator:
             })
             calc_details.append(f"ICS2费：欧盟入境申报70元/单")
 
-        # 5. 陆运费（拖车费，按距离×箱数计算）
-        inland_per_box = self._calculate_inland_rate(factory_name, origin_port, weight, box_type)
+        # 5. 陆运费（拖车费，按距离×箱数计算，使用主要箱型计算单箱费率）
+        inland_per_box = self._calculate_inland_rate(factory_name, origin_port, weight, primary_box_type)
         inland_fee = round(inland_per_box * actual_boxes, 2)
         fee_items.append({
             "name": "陆运费",
@@ -178,18 +189,26 @@ class CostCalculator:
         })
         calc_details.append(f"报关费：{customs_fee}元/单")
 
-        # 7. 海运费（按箱数计算，核心变动项）
-        ocean_per_box = self._calculate_ocean_rate(dest_country, origin_port, box_type)
-        ocean_fee = round(ocean_per_box * actual_boxes, 2)
+        # 7. 海运费（按箱数计算，支持多箱型分别计算并累加）
+        ocean_fee = 0
+        ocean_details_parts = []
+        for bt, qty in box_type_counts.items():
+            bt_per_box = self._calculate_ocean_rate(dest_country, origin_port, bt)
+            bt_subtotal = round(bt_per_box * qty, 2)
+            ocean_fee += bt_subtotal
+            ocean_details_parts.append(f"{bt}：{bt_per_box}元/箱 × {qty}箱 = {bt_subtotal}元")
+
+        ocean_fee = round(ocean_fee, 2)
         if trade_term in ("CIF", "CFR", "DDP", "DAP"):
+            ocean_basis = " + ".join([f"{bt} {self._calculate_ocean_rate(dest_country, origin_port, bt)}元/箱×{qty}箱" for bt, qty in box_type_counts.items()])
             fee_items.append({
-                "name": "海运费",
+                "name": "海运费" + ("（多箱型合计）" if is_multi_box else ""),
                 "category": "出口海运费",
                 "amount_cny": ocean_fee,
                 "amount_usd": round(ocean_fee * CNY_TO_USD, 2),
-                "basis": f"单箱{ocean_per_box}元 × {actual_boxes}箱",
+                "basis": ocean_basis if is_multi_box else f"单箱{ocean_fee/actual_boxes:.0f}元 × {actual_boxes}箱",
             })
-            calc_details.append(f"海运费：{ocean_per_box}元/箱 × {actual_boxes}箱 = {ocean_fee}元")
+            calc_details.append(f"海运费：{' + '.join(ocean_details_parts)} = {ocean_fee}元")
 
         # 8. 保险费（仅CIF，基于海运费计算）
         if trade_term == "CIF":
@@ -224,11 +243,14 @@ class CostCalculator:
             "total_cny": total_cny,
             "total_usd": total_usd,
             "currency": "CNY",
-            "box_type": box_type,
+            "box_type": primary_box_type,
+            "box_types": list(box_type_counts.keys()),  # 所有箱型列表
+            "box_type_counts": box_type_counts,  # 各箱型数量
             "box_count": actual_boxes,
             "trade_term": trade_term,
             "calc_details": calc_details,
-            "note": f"基于历史费率动态计算：共{len(fee_items)}项费用，{actual_boxes}个集装箱",
+            "note": f"基于历史费率动态计算：共{len(fee_items)}项费用，{actual_boxes}个集装箱"
+                    + (f"（{len(box_type_counts)}种箱型）" if is_multi_box else ""),
         }
 
     def _get_port_fee_rate(self, fee_category, origin_port, country_fees):

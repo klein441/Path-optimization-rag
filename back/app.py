@@ -8,7 +8,7 @@ Flask API 服务器 — 物流运输路径智能优化后端（基于8张数据�
   GET  /api/logistics/countries  — 获取所有运抵国列表
   GET  /api/logistics/country-info — 获取指定运抵国详情
   GET  /api/logistics/health     — 健康检查
-  GET  /api/freight-rate         — 海运费实时查询（Freightos API代理，支持持久化缓存）
+  GET  /api/freight-rate         — 海运费合约查询（读取合约信息导出0806.xlsx）
   GET  /api/route-info           — 航线信息查询（产品→工厂→港口链路）
 """
 import sys
@@ -197,6 +197,9 @@ def _format_primary(p, full_result):
             'costScope': trade_info.get('cost_scope', ''),
         },
         'boxType': p.get('boxType', '40HQ'),
+        'boxTypes': cost.get('box_types', [p.get('boxType', '40HQ')]),
+        'boxTypeCounts': cost.get('box_type_counts', {p.get('boxType', '40HQ'): cost.get('box_count', 1)}),
+        'boxCount': cost.get('box_count', 1),
         'score': p.get('score', 0),
         'inlandDays': timeline.get('inland_days', 0),
         'oceanDays': timeline.get('ocean_days', 0),
@@ -213,6 +216,8 @@ def _format_primary(p, full_result):
             'currency': cost.get('currency', 'CNY'),
             'note': cost.get('note', ''),
             'box_count': cost.get('box_count', 1),
+            'box_types': cost.get('box_types', [p.get('boxType', '40HQ')]),
+            'box_type_counts': cost.get('box_type_counts', {p.get('boxType', '40HQ'): 1}),
             'calc_details': cost.get('calc_details', []),
         },
         'factoryInfo': p.get('factoryInfo', {}),
@@ -287,12 +292,16 @@ def get_route_info():
     eng = get_engine()
     kb = eng.kb
 
-    # 1. 根据产品类型找最优工厂（产能最高）
+    # 1. 根据产品类型找最优工厂（与推荐引擎保持一致的排序逻辑）
     factories = kb.get_factory_by_product(product_type)
     if not factories:
         # 回退：使用所有工厂
         for name, info in kb.factory_info.items():
             factories.append({"name": name, "info": info})
+
+    # 北美市场优先海外工厂（与推荐引擎 _find_factories 保持一致）
+    if dest_country in config.NORTH_AMERICA:
+        factories.sort(key=lambda x: 0 if x["info"].get("region", "") == "海外" else 1)
 
     best_factory = factories[0]
     factory_name = best_factory["name"]
@@ -310,13 +319,25 @@ def get_route_info():
     dest_port_clean = _clean_port_name(dest_port)
     origin_port_clean = _clean_port_name(origin_port)
 
-    # 4. 港口名→Freightos代码
-    origin_code = _resolve_freightos_port(origin_port_clean)
-    dest_code = _resolve_freightos_port(dest_port_clean)
+    # 4. 港口代码（从港口名里的 LOCODE 提取，如 "CNSHA / 上海/SHANGHAI" → "CNSHA"）
+    def _extract_port_code(port_name):
+        import re as _re_local
+        if not port_name:
+            return ""
+        # 如果本身就像 LOCODE（5位字母数字）
+        if _re_local.match(r'^[A-Z]{2}[A-Z0-9]{3}$', str(port_name).strip()):
+            return str(port_name).strip()
+        # 从 "CNSHA / 上海/SHANGHAI" 格式里提取前缀
+        m = _re_local.match(r'^([A-Z]{2}[A-Z0-9]{3})\s*/', str(port_name).strip())
+        if m:
+            return m.group(1)
+        return str(port_name).strip()
+    origin_code = _extract_port_code(origin_port_clean)
+    dest_code = _extract_port_code(dest_port_clean)
 
-    # 5. 箱型→Freightos loadtype
-    load_type = _resolve_freightos_box(box_type)
-    is_fcl = 'container' in load_type or 'reefer' in load_type
+    # 5. 箱型 → 合约报价列（用于isFCL判断，整箱都是FCL）
+    is_fcl = box_type in ('20GP', '40GP', '40HQ', '45HQ', '20RF', '40RF', '40HC', '45HC')
+    load_type = 'FCL' if is_fcl else 'LCL'
 
     # 6. 计算最大可接受转运天数
     max_transit_days = None
@@ -344,6 +365,7 @@ def get_route_info():
             'factory': factory_name,
             'factoryShort': factory_info.get('short_name', factory_name),
             'factoryRegion': factory_info.get('region', '国内'),
+            'factoryProvince': factory_info.get('province', ''),
             'originPort': origin_port_clean,
             'originPortCode': origin_code,
             'destPort': dest_port_clean,
@@ -364,322 +386,263 @@ def get_route_info():
     })
 
 
-# ===== 海运费实时查询（Freightos API 代理）=====
+# ===== 海运费合约查询（读取本地合约信息导出0806.xlsx）=====
 
-FREIGHTOS_API_URL = "https://ship.freightos.com/api/shippingCalculator"
+import pandas as pd
+import re as _re
 
-# Freightos 需要浏览器User-Agent，python-requests默认UA会被限流
-_FREIGHTOS_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Referer": "https://www.freightos.com/",
-}
-
-# 持久化缓存 + 智能限流保护
-_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_freightos_cache.json")
-_FREIGHTOS_CACHE_TTL = 3600      # 新鲜缓存：1小时
-_FREIGHTOS_STALE_TTL = 86400     # 降级缓存：24小时（过期但仍可展示）
-_FREIGHTOS_COOLDOWN = 1800       # 遇到429后冷却30分钟，不再尝试请求
+# 合约数据内存缓存（带刷新TTL）
+_CONTRACT_CACHE = None
+_CONTRACT_CACHE_TIME = 0
 
 
-def _load_cache():
-    """从磁盘加载缓存"""
-    if os.path.exists(_CACHE_FILE):
-        try:
-            with open(_CACHE_FILE, 'r', encoding='utf-8') as f:
-                data = json_module.load(f)
-                print(f"[Freightos] 从磁盘加载了 {len(data.get('entries', {}))} 条缓存记录")
-                return data
-        except Exception as e:
-            print(f"[Freightos] 缓存文件读取失败: {e}")
-    return {"entries": {}, "last_429": None}
+def _load_contract_data():
+    """加载并缓存合约海运费Excel数据，按TTL自动刷新"""
+    global _CONTRACT_CACHE, _CONTRACT_CACHE_TIME
+    now = time.time()
+    if _CONTRACT_CACHE is not None and (now - _CONTRACT_CACHE_TIME) < config.CONTRACT_FREIGHT_CACHE_TTL:
+        return _CONTRACT_CACHE
 
+    fpath = config.CONTRACT_FREIGHT_FILE
+    if not os.path.exists(fpath):
+        print(f"[合约运费] 文件不存在: {fpath}")
+        return pd.DataFrame()
 
-def _save_cache(cache_data):
-    """保存缓存到磁盘"""
     try:
-        # 清理过期超过24小时的条目
-        now = time.time()
-        cache_data["entries"] = {
-            k: v for k, v in cache_data["entries"].items()
-            if now - v["time"] < _FREIGHTOS_STALE_TTL
-        }
-        with open(_CACHE_FILE, 'w', encoding='utf-8') as f:
-            json_module.dump(cache_data, f, ensure_ascii=False, default=str)
+        df = pd.read_excel(fpath, sheet_name=0)
+        # 统一箱型列名容错
+        rename_map = {}
+        for col in df.columns:
+            col_s = str(col).strip()
+            if '20' in col_s and 'GP' in col_s and '报' in col_s:
+                rename_map[col] = '20GP报价'
+            elif '40' in col_s and 'GP' in col_s and '报' in col_s:
+                rename_map[col] = '40GP报价'
+            elif '40' in col_s and ('HC' in col_s or 'HQ' in col_s) and '报' in col_s:
+                rename_map[col] = '40HC报价'
+            elif '45' in col_s and ('HC' in col_s or 'HQ' in col_s) and '报' in col_s:
+                rename_map[col] = '45HC报价'
+        if rename_map:
+            df = df.rename(columns=rename_map)
+        # 清洗数值列
+        for col in ['20GP报价', '40GP报价', '40HC报价', '45HC报价']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+        # 日期列
+        for col in ['合约生效日期', '合约失效日期']:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+
+        _CONTRACT_CACHE = df
+        _CONTRACT_CACHE_TIME = now
+        print(f"[合约运费] 加载完成: {df.shape[0]} 条记录, {df.shape[1]} 列")
+        return df
     except Exception as e:
-        print(f"[Freightos] 缓存写入失败: {e}")
+        print(f"[合约运费] 加载失败: {e}")
+        return pd.DataFrame()
 
 
-_freightos_cache = _load_cache()
+def _contract_port_match(contract_port_list, target_port):
+    """判断合约里的港口列表（逗号分隔，可能多港）是否包含目标港口
 
-
-def _clean_port_name(port_name):
-    """清理港口名中的州/省代码后缀（如 ',CA', ',TX'）
-    例如：'洛杉矶/LOS ANGELES,CA' → '洛杉矶/LOS ANGELES'
+    支持合约格式: "CNSHA / 上海/SHANGHAI, CNNBO / 宁波/NINGBO"
+    支持目标格式: "上海/SHANGHAI" / "上海" / "SHANGHAI" / "洛杉矶/LOS ANGELES,CA"
     """
-    if not port_name:
-        return port_name
-    import re
-    return re.sub(r',\s*[A-Z]{2,3}\s*$', '', str(port_name)).strip()
+    if not contract_port_list or pd.isna(contract_port_list):
+        return False
+    if not target_port:
+        return False
+
+    target = str(target_port).strip()
+    # 去掉目标里的州代码后缀
+    target_clean = _re.sub(r',\s*[A-Z]{2,3}\s*$', '', target).strip()
+    target_upper = target_clean.upper()
+    target_chinese = target_clean.split('/')[0].strip() if '/' in target_clean else target_clean
+    target_english = target_clean.split('/')[-1].strip() if '/' in target_clean else target_clean
+    # 再去除英文里的州后缀
+    target_english = _re.sub(r',\s*[A-Z]{2,3}\s*$', '', target_english).strip()
+
+    # 合约港口按逗号拆分（多港）
+    contract_ports = [p.strip() for p in str(contract_port_list).split(',') if p.strip()]
+    for cp in contract_ports:
+        cp_upper = cp.upper()
+        # 方式1: 目标中文名包含在合约港口里
+        if target_chinese and target_chinese in cp:
+            return True
+        # 方式2: 目标英文名包含在合约港口里
+        if target_english and target_english.upper() in cp_upper:
+            return True
+        # 方式3: 目标整体名的一部分包含
+        if target_clean and target_clean in cp:
+            return True
+        # 方式4: LOCODE 匹配（合约里的XXXXX前缀）
+        locode_match = _re.match(r'^([A-Z]{2}[A-Z0-9]{3})\s*/', cp)
+        if locode_match and target_upper and locode_match.group(1) in target_upper:
+            return True
+    return False
 
 
-def _resolve_freightos_port(port_name):
-    """将系统内部港口名映射为 Freightos 港口代码"""
-    if not port_name:
-        return config.FREIGHTOS_FALLBACK_PORT
+def _contract_find_rates(df, origin, destination, box_type):
+    """从合约表中查找匹配的航线报价，返回匹配行列表
 
-    # 清理：去掉州/省代码后缀（如 ",CA", ",TX"）和多余空格
-    import re
-    cleaned = re.sub(r',\s*[A-Z]{2,3}\s*$', '', str(port_name)).strip()
-    port_name_upper = cleaned.upper()
-    # 精确匹配
-    if port_name in config.FREIGHTOS_PORT_MAP:
-        return config.FREIGHTOS_PORT_MAP[port_name]
-    if port_name_upper in config.FREIGHTOS_PORT_MAP:
-        return config.FREIGHTOS_PORT_MAP[port_name_upper]
-    # 模糊匹配：尝试提取关键港口名
-    for key, code in config.FREIGHTOS_PORT_MAP.items():
-        if key.upper() == port_name_upper:
-            return code
-    # 包含匹配
-    for key, code in config.FREIGHTOS_PORT_MAP.items():
-        if port_name_upper in key.upper():
-            return code
-    # 最后回退到上海
-    return config.FREIGHTOS_FALLBACK_PORT
+    返回: list[dict] — 每个元素包含船公司、报价、币种、生效/失效日期等
+    """
+    if df.empty:
+        return []
 
+    box_col = config.CONTRACT_BOX_COLUMNS.get(box_type, '40HC报价')
+    if box_col not in df.columns:
+        return []
 
-def _resolve_freightos_box(box_type):
-    """将系统箱型映射为 Freightos loadtype"""
-    return config.FREIGHTOS_BOX_MAP.get(box_type, "container40")
+    # 过滤出箱型报价非空的行
+    valid = df[df[box_col].notna() & (df[box_col] > 0)].copy()
+    if valid.empty:
+        return []
+
+    # 匹配起运港和目的港
+    origin_mask = valid['起运港'].apply(lambda x: _contract_port_match(x, origin))
+    dest_mask = valid['目的港'].apply(lambda x: _contract_port_match(x, destination))
+    matched = valid[origin_mask & dest_mask].copy()
+
+    if matched.empty:
+        # 更宽松：目的港用运抵国（中文名）包含匹配
+        dest_chinese = str(destination).split('/')[0].strip() if '/' in str(destination) else str(destination)
+        if dest_chinese and len(dest_chinese) >= 2:
+            dest_mask_loose = valid['目的港'].apply(lambda x: dest_chinese in str(x))
+            matched = valid[origin_mask & dest_mask_loose].copy()
+
+    results = []
+    for _, row in matched.iterrows():
+        rate = float(row[box_col])
+        # 判断合约是否有效（当前日期在生效/失效之间）
+        today = pd.Timestamp.now().normalize()
+        effective_from = row['合约生效日期'] if '合约生效日期' in row and pd.notna(row['合约生效日期']) else None
+        effective_to = row['合约失效日期'] if '合约失效日期' in row and pd.notna(row['合约失效日期']) else None
+        is_valid = True
+        if effective_from and today < effective_from:
+            is_valid = False
+        if effective_to and today > effective_to:
+            is_valid = False
+
+        results.append({
+            'carrier': row.get('船公司简称', ''),
+            'origin': row.get('起运港', ''),
+            'destination': row.get('目的港', ''),
+            'rate': rate,
+            'currency': str(row.get('币种', 'USD')),
+            'effectiveFrom': effective_from.strftime('%Y-%m-%d') if effective_from and pd.notna(effective_from) else None,
+            'effectiveTo': effective_to.strftime('%Y-%m-%d') if effective_to and pd.notna(effective_to) else None,
+            'isValid': is_valid,
+            'note': str(row.get('备注', '')) if pd.notna(row.get('备注', '')) else '',
+        })
+
+    # 有效优先，然后按价格升序
+    results.sort(key=lambda r: (0 if r['isValid'] else 1, r['rate']))
+    return results
 
 
 @app.route('/api/freight-rate', methods=['GET'])
 def get_freight_rate():
-    """海运费实时查询接口（代理 Freightos API）"""
+    """海运费合约查询接口（读取合约信息导出0806.xlsx）
+
+    参数:
+        origin      — 起运港（如 "上海/SHANGHAI"）
+        destination — 目的港/运抵国（如 "洛杉矶/LOS ANGELES" 或 "美国"）
+        boxType     — 箱型 20GP/40GP/40HQ/45HQ（默认 40HQ）
+    """
     origin = request.args.get('origin', '上海/SHANGHAI')
     destination = request.args.get('destination', '洛杉矶/LOS ANGELES')
     box_type = request.args.get('boxType', '40HQ')
-    weight = request.args.get('weight', '15000')
-    quantity = request.args.get('quantity', '1')
 
-    origin_code = _resolve_freightos_port(origin)
-    dest_code = _resolve_freightos_port(destination)
-    load_type = _resolve_freightos_box(box_type)
+    # 箱型参数规范化容错
+    bt = str(box_type).strip().upper()
+    if bt in ('40HC', '40HQ', '40H'):
+        box_type_norm = '40HQ'
+    elif bt == '45HC' or bt == '45HQ':
+        box_type_norm = '45HQ'
+    elif bt == '20GP':
+        box_type_norm = '20GP'
+    elif bt == '40GP':
+        box_type_norm = '40GP'
+    else:
+        box_type_norm = '40HQ'
 
-    cache_key = f"{origin_code}|{dest_code}|{load_type}|{weight}|{quantity}"
-    cache_entry = _freightos_cache["entries"].get(cache_key)
+    df = _load_contract_data()
+    if df.empty:
+        return jsonify({
+            'success': False,
+            'error': '合约运费文件未找到或加载失败',
+            'hint': f'请确认文件存在: {config.CONTRACT_FREIGHT_FILE}',
+        }), 500
 
-    # 新鲜缓存命中（1小时内）
-    if cache_entry and (time.time() - cache_entry['time']) < _FREIGHTOS_CACHE_TTL:
-        resp_data = cache_entry['data'].copy()
-        resp_data['data']['cached'] = True
-        resp_data['data']['cachedAt'] = datetime.fromtimestamp(cache_entry['time']).isoformat()
-        resp_data['data']['fetchedAt'] = resp_data['data'].get('fetchedAt', resp_data['data']['cachedAt'])
-        print(f"[Freightos] 缓存命中: {origin_code}→{dest_code}")
-        return jsonify(resp_data)
+    matched = _contract_find_rates(df, origin, destination, box_type_norm)
+    unit = config.CONTRACT_BOX_UNIT.get(box_type_norm, 'FEU')
 
-    # 降级缓存（过期但仍有数据可展示）
-    stale_cache = cache_entry
+    if not matched:
+        return jsonify({
+            'success': False,
+            'error': f'合约中未找到匹配航线: {origin} → {destination} ({box_type_norm})',
+            'hint': '请调整起运港/目的港/箱型，或手动输入海运费金额',
+            'query': {
+                'origin': origin,
+                'destination': destination,
+                'boxType': box_type_norm,
+            },
+        }), 404
 
-    # 限流冷却检查：如果最近遇到过429，先冷却一段时间
-    last_429 = _freightos_cache.get("last_429")
-    if last_429:
-        cooldown_remaining = _FREIGHTOS_COOLDOWN - (time.time() - last_429)
-        if cooldown_remaining > 0:
-            cooldown_min = int(cooldown_remaining / 60) + 1
-            print(f"[Freightos] 冷却中（{cooldown_min}分钟后解禁），跳过API请求")
-            if stale_cache:
-                stale_cache['data']['data']['stale'] = True
-                stale_cache['data']['data']['staleWarning'] = f'API冷却中（{cooldown_min}分钟后自动重试），显示缓存数据'
-                stale_cache['data']['data']['cached'] = True
-                stale_cache['data']['data']['cachedAt'] = datetime.fromtimestamp(stale_cache['time']).isoformat()
-                return jsonify(stale_cache['data'])
-            return jsonify({
-                'success': False,
-                'error': f'Freightos API 限流保护中（约{cooldown_min}分钟后自动恢复）',
-                'hint': '请稍后再试，或手动输入海运费金额',
-                'cooldownMinutes': cooldown_min,
-            }), 429
-        else:
-            # 冷却期结束，清除标记
-            _freightos_cache["last_429"] = None
-            _save_cache(_freightos_cache)
+    rates = [m['rate'] for m in matched if m['isValid']]
+    if not rates:
+        rates = [m['rate'] for m in matched]  # 没有有效则用全部
 
-    # 构建 Freightos 请求
-    params = {
-        "loadtype": load_type,
-        "weight": weight,
-        "origin": origin_code,
-        "quantity": quantity,
-        "destination": dest_code,
-    }
+    min_rate = min(rates)
+    max_rate = max(rates)
+    median_rate = round((min_rate + max_rate) / 2, 2) if len(rates) > 1 else min_rate
 
-    raw_data = None
-    http_error = None
-    resp = None
+    # 取前8家船公司报价展示
+    quotes = matched[:8]
+    currency = quotes[0]['currency'] if quotes else 'USD'
 
-    # 构建查询URL
-    query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    full_url = f"{FREIGHTOS_API_URL}?{query_string}"
-
-    try:
-        # Step 1: 尝试 Python requests（带浏览器UA）
-        resp = requests.get(FREIGHTOS_API_URL, params=params, timeout=15, headers=_FREIGHTOS_HEADERS)
-
-        if resp.status_code == 429:
-            # Python请求被限流 → 回退到 curl 子进程
-            print("[Freightos] Python请求429，回退到curl...")
-            import subprocess
-            curl_result = subprocess.run([
-                "curl", "-s", "--max-time", "15",
-                "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                "-H", "Accept: application/json, text/plain, */*",
-                "-H", "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8",
-                full_url
-            ], capture_output=True, text=True, timeout=18)
-
-            curl_output = curl_result.stdout.strip()
-            if curl_output and curl_output.startswith('{'):
-                raw_data = json_module.loads(curl_output)
-                print("[Freightos] curl成功获取数据")
-            else:
-                # curl也失败 → 启动冷却
-                _freightos_cache["last_429"] = time.time()
-                _save_cache(_freightos_cache)
-                print("[Freightos] curl也失败，启动冷却")
-                if stale_cache:
-                    stale_cache['data']['data']['stale'] = True
-                    stale_cache['data']['data']['staleWarning'] = 'Freightos API 限流，显示缓存数据'
-                    stale_cache['data']['data']['cached'] = True
-                    return jsonify(stale_cache['data'])
-                return jsonify({
-                    'success': False,
-                    'error': 'Freightos API 限流 (HTTP 429)',
-                    'hint': '已启动30分钟冷却保护，请稍后再试或手动输入海运费',
-                }), 429
-        else:
-            resp.raise_for_status()
-            raw_data = resp.json()
-
-    except requests.exceptions.Timeout:
-        if stale_cache:
-            stale_cache['data']['data']['stale'] = True
-            stale_cache['data']['data']['staleWarning'] = 'API超时，显示缓存数据'
-            stale_cache['data']['data']['cached'] = True
-            return jsonify(stale_cache['data'])
-        return jsonify({'success': False, 'error': 'API请求超时', 'hint': '请检查网络连接或稍后重试'}), 504
-    except requests.exceptions.HTTPError:
-        http_error = True
-    except requests.exceptions.ConnectionError:
-        if stale_cache:
-            stale_cache['data']['data']['stale'] = True
-            stale_cache['data']['data']['staleWarning'] = '无法连接API，显示缓存数据'
-            stale_cache['data']['data']['cached'] = True
-            return jsonify(stale_cache['data'])
-        return jsonify({'success': False, 'error': '无法连接到 Freightos API', 'hint': '请检查网络连接'}), 502
-    except subprocess.TimeoutExpired:
-        if stale_cache:
-            stale_cache['data']['data']['stale'] = True
-            stale_cache['data']['data']['staleWarning'] = 'curl超时，显示缓存数据'
-            stale_cache['data']['data']['cached'] = True
-            return jsonify(stale_cache['data'])
-        pass
-    except Exception as e:
-        if stale_cache:
-            stale_cache['data']['data']['stale'] = True
-            stale_cache['data']['data']['staleWarning'] = f'API异常: {str(e)[:80]}'
-            stale_cache['data']['data']['cached'] = True
-            return jsonify(stale_cache['data'])
-        return jsonify({'success': False, 'error': f'请求异常: {str(e)[:150]}'}), 502
-
-    if raw_data is None:
-        if http_error and stale_cache:
-            stale_cache['data']['data']['stale'] = True
-            stale_cache['data']['data']['staleWarning'] = f'Freightos API 错误 (HTTP {resp.status_code})，显示缓存数据'
-            stale_cache['data']['data']['cached'] = True
-            stale_cache['data']['data']['cachedAt'] = datetime.fromtimestamp(stale_cache['time']).isoformat()
-            return jsonify(stale_cache['data'])
-        if http_error:
-            return jsonify({
-                'success': False,
-                'error': f'Freightos API 返回错误: HTTP {resp.status_code}',
-            }), resp.status_code
-        return jsonify({'success': False, 'error': '未知错误'}), 500
-
-    # 解析 Freightos 响应
-    # Freightos API 可能在 response 外套一层 {"response": {...}}
-    # 也可能直接返回 {...}，两种格式都兼容
-    mode_data = {}
-    estimated = raw_data.get('estimatedFreightRates', {})
-    if not estimated and 'response' in raw_data:
-        estimated = raw_data.get('response', {}).get('estimatedFreightRates', {})
-    if estimated:
-        mode_data = estimated.get('mode', {})
-
-    price_data = mode_data.get('price', {})
-    min_rate = price_data.get('min', {}).get('moneyAmount', {}).get('amount', 0) if price_data else 0
-    max_rate = price_data.get('max', {}).get('moneyAmount', {}).get('amount', 0) if price_data else 0
-    median_rate = round((min_rate + max_rate) / 2, 2) if min_rate and max_rate else 0
-
-    transit = mode_data.get('transitTimes', {})
-    transit_days = None
-    if transit:
-        t_min = transit.get('min', 0)
-        t_max = transit.get('max', 0)
-        if t_min and t_max:
-            transit_days = f"{t_min}-{t_max}"
-
-    mode_type = mode_data.get('mode', 'FCL')
-    num_quotes = estimated.get('numQuotes', 0)
+    # 有效性概览
+    valid_count = sum(1 for m in matched if m['isValid'])
+    total_count = len(matched)
 
     result = {
         'success': True,
-        'source': 'Freightos',
+        'source': '合约信息导出0806.xlsx',
         'data': {
             'origin': origin,
-            'originCode': origin_code,
             'destination': destination,
-            'destinationCode': dest_code,
-            'boxType': box_type,
-            'loadType': load_type,
-            'weight': float(weight),
-            'quantity': int(quantity),
-            'minRate': min_rate,
-            'maxRate': max_rate,
-            'medianRate': median_rate,
-            'currency': 'USD',
-            'mode': mode_type,
-            'numQuotes': num_quotes,
-            'unit': 'FEU' if load_type in ('container40', 'container40hc', 'container45hc') else 'TEU',
-            'transitDays': transit_days,
-            'raw': raw_data,
+            'boxType': box_type_norm,
+            'currency': currency,
+            'unit': unit,
+            'minRate': round(min_rate, 2),
+            'maxRate': round(max_rate, 2),
+            'medianRate': round(median_rate, 2),
+            'avgRate': round(sum(rates) / len(rates), 2),
+            'quotes': quotes,
+            'quoteCount': total_count,
+            'validQuoteCount': valid_count,
+            'fileUpdate': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(config.CONTRACT_FREIGHT_FILE)))
+            if os.path.exists(config.CONTRACT_FREIGHT_FILE) else None,
             'fetchedAt': datetime.now().isoformat(),
-            'cached': False,
+            'matchStrategy': 'exact' if valid_count > 0 else ('loose' if matched else 'none'),
         }
     }
-
-    # 写入持久化缓存
-    _freightos_cache["entries"][cache_key] = {
-        'time': time.time(),
-        'data': result
-    }
-    _save_cache(_freightos_cache)
-    print(f"[Freightos] 缓存已持久化: {origin_code}→{dest_code} min=${min_rate} max=${max_rate}")
-
+    print(f"[合约运费] 查询: {origin}→{destination} {box_type_norm} "
+          f"→ 匹配{total_count}条（有效{valid_count}条）, "
+          f"min={min_rate} max={max_rate} median={median_rate}")
     return jsonify(result)
 
 
 @app.route('/api/freight-rate-batch', methods=['POST'])
 def get_freight_rate_batch():
-    """批量海运费查询接口（用于一次性获取多个航线价格）
+    """批量海运费合约查询接口
 
     请求体 JSON:
     {
         "routes": [
-            {"origin": "上海/SHANGHAI", "destination": "洛杉矶/LOS ANGELES", "boxType": "40HQ", "weight": 15000, "quantity": 1},
-            {"origin": "青岛/QINGDAO", "destination": "鹿特丹/ROTTERDAM", "boxType": "40HQ", "weight": 15000, "quantity": 1}
+            {"origin": "上海/SHANGHAI", "destination": "洛杉矶/LOS ANGELES", "boxType": "40HQ"},
+            {"origin": "青岛/QINGDAO", "destination": "鹿特丹/ROTTERDAM", "boxType": "40HQ"}
         ]
     }
     """
@@ -691,65 +654,107 @@ def get_freight_rate_batch():
     if not isinstance(routes, list) or len(routes) == 0:
         return jsonify({'error': 'routes 必须是非空数组'}), 400
 
+    df = _load_contract_data()
     results = []
     errors = []
 
     for i, route in enumerate(routes):
         try:
             origin = route.get('origin', '上海/SHANGHAI')
+            destination = route.get('destination', '')
+            bt = route.get('boxType', '40HQ')
+            bt_norm = '40HQ'
+            bt_s = str(bt).strip().upper()
+            if bt_s in ('40HC', '40HQ'):
+                bt_norm = '40HQ'
+            elif bt_s == '45HC' or bt_s == '45HQ':
+                bt_norm = '45HQ'
+            elif bt_s == '20GP':
+                bt_norm = '20GP'
+            elif bt_s == '40GP':
+                bt_norm = '40GP'
+
+            matched = _contract_find_rates(df, origin, destination, bt_norm)
+            if matched:
+                rates = [m['rate'] for m in matched if m['isValid']] or [m['rate'] for m in matched]
+                min_r = min(rates)
+                max_r = max(rates)
+                med_r = round((min_r + max_r) / 2, 2) if len(rates) > 1 else min_r
+                unit = config.CONTRACT_BOX_UNIT.get(bt_norm, 'FEU')
+                results.append({
+                    'index': i,
+                    'origin': origin,
+                    'destination': destination,
+                    'boxType': bt_norm,
+                    'success': True,
+                    'minRate': round(min_r, 2),
+                    'maxRate': round(max_r, 2),
+                    'medianRate': round(med_r, 2),
+                    'currency': (matched[0]['currency'] if matched else 'USD'),
+                    'unit': unit,
+                    'quoteCount': len(matched),
+                    'validQuoteCount': sum(1 for m in matched if m['isValid']),
+                    'quotes': matched[:5],
+                })
+            else:
+                errors.append({
+                    'index': i,
+                    'origin': origin,
+                    'destination': destination,
+                    'boxType': bt_norm,
+                    'success': False,
+                    'error': '未匹配到合约报价',
+                })
+        except Exception as e:
+            errors.append({
+                'index': i,
+                'success': False,
+                'error': f'处理异常: {str(e)[:120]}',
+            })
+            origin = route.get('origin', '上海/SHANGHAI')
             destination = route.get('destination', '洛杉矶/LOS ANGELES')
             box_type = route.get('boxType', '40HQ')
-            weight = route.get('weight', '15000')
-            quantity = route.get('quantity', '1')
 
-            origin_code = _resolve_freightos_port(origin)
-            dest_code = _resolve_freightos_port(destination)
-            load_type = _resolve_freightos_box(box_type)
+            bt_norm = '40HQ'
+            bt_s = str(box_type).strip().upper()
+            if bt_s in ('40HC', '40HQ'):
+                bt_norm = '40HQ'
+            elif bt_s == '45HC' or bt_s == '45HQ':
+                bt_norm = '45HQ'
+            elif bt_s == '20GP':
+                bt_norm = '20GP'
+            elif bt_s == '40GP':
+                bt_norm = '40GP'
 
-            params = {
-                "loadtype": load_type,
-                "weight": weight,
-                "origin": origin_code,
-                "quantity": quantity,
-                "destination": dest_code,
-            }
-
-            resp = requests.get(FREIGHTOS_API_URL, params=params, timeout=15, headers=_FREIGHTOS_HEADERS)
-            resp.raise_for_status()
-            raw_data = resp.json()
-
-            # 解析 Freightos 嵌套格式（兼容 response 包装）
-            estimated = raw_data.get('estimatedFreightRates', {})
-            if not estimated and 'response' in raw_data:
-                estimated = raw_data.get('response', {}).get('estimatedFreightRates', {})
-            mode_data = estimated.get('mode', {}) if estimated else {}
-            price_data = mode_data.get('price', {})
-
-            min_rate = price_data.get('min', {}).get('moneyAmount', {}).get('amount', 0) if price_data else 0
-            max_rate = price_data.get('max', {}).get('moneyAmount', {}).get('amount', 0) if price_data else 0
-            median_rate = round((min_rate + max_rate) / 2, 2) if min_rate and max_rate else 0
-
-            transit = mode_data.get('transitTimes', {})
-            transit_days = None
-            if transit:
-                t_min = transit.get('min', 0)
-                t_max = transit.get('max', 0)
-                if t_min and t_max:
-                    transit_days = f"{t_min}-{t_max}"
-
-            results.append({
-                'index': i,
-                'origin': origin,
-                'destination': destination,
-                'boxType': box_type,
-                'minRate': min_rate,
-                'maxRate': max_rate,
-                'medianRate': median_rate,
-                'currency': 'USD',
-                'transitDays': transit_days,
-                'mode': mode_data.get('mode', 'FCL'),
-                'success': True,
-            })
+            matched = _contract_find_rates(df, origin, destination, bt_norm)
+            if matched:
+                rates = [m['rate'] for m in matched if m['isValid']] or [m['rate'] for m in matched]
+                min_r = min(rates)
+                max_r = max(rates)
+                med_r = round((min_r + max_r) / 2, 2) if len(rates) > 1 else min_r
+                unit = config.CONTRACT_BOX_UNIT.get(bt_norm, 'FEU')
+                results.append({
+                    'index': i,
+                    'origin': origin,
+                    'destination': destination,
+                    'boxType': bt_norm,
+                    'minRate': round(min_r, 2),
+                    'maxRate': round(max_r, 2),
+                    'medianRate': round(med_r, 2),
+                    'currency': (matched[0]['currency'] if matched else 'USD'),
+                    'unit': unit,
+                    'quoteCount': len(matched),
+                    'validQuoteCount': sum(1 for m in matched if m['isValid']),
+                    'quotes': matched[:5],
+                    'success': True,
+                })
+            else:
+                errors.append({
+                    'index': i,
+                    'route': route,
+                    'error': '未匹配到合约报价',
+                    'success': False,
+                })
 
         except Exception as e:
             errors.append({
@@ -761,12 +766,239 @@ def get_freight_rate_batch():
 
     return jsonify({
         'success': True,
+        'source': '合约信息导出0806.xlsx',
         'totalRoutes': len(routes),
         'successCount': len(results),
         'failCount': len(errors),
         'results': results,
         'errors': errors,
         'fetchedAt': datetime.now().isoformat(),
+    })
+
+
+# ===== 船公司海运费比价接口 =====
+
+def _contract_find_carrier_rates_multi(df, origin, destination, box_types):
+    """从合约表中查找所有匹配的船公司，并返回各箱型报价
+
+    返回: dict — {carrier_name: {boxType: rate, ...}}
+    """
+    if df.empty:
+        return {}
+
+    # 匹配航线
+    origin_mask = df['起运港'].apply(lambda x: _contract_port_match(x, origin))
+    dest_mask = df['目的港'].apply(lambda x: _contract_port_match(x, destination))
+    route_matched = df[origin_mask & dest_mask].copy()
+
+    if route_matched.empty:
+        # 宽松匹配：目的港用中文名包含
+        dest_chinese = str(destination).split('/')[0].strip() if '/' in str(destination) else str(destination)
+        if dest_chinese and len(dest_chinese) >= 2:
+            dest_mask_loose = df['目的港'].apply(lambda x: dest_chinese in str(x))
+            route_matched = df[origin_mask & dest_mask_loose].copy()
+
+    if route_matched.empty:
+        return {}
+
+    # 确定箱型→列名映射
+    box_col_map = {}
+    for bt in box_types:
+        bt_s = str(bt).strip().upper()
+        if bt_s in ('40HC', '40HQ'):
+            col = '40HC报价'
+        elif bt_s in ('45HC', '45HQ'):
+            col = '45HC报价'
+        elif bt_s == '20GP':
+            col = '20GP报价'
+        elif bt_s == '40GP':
+            col = '40GP报价'
+        else:
+            continue
+        if col in route_matched.columns:
+            box_col_map[bt] = col
+
+    if not box_col_map:
+        return {}
+
+    # 按船公司分组，收集各箱型报价（取有效的最低报价）
+    today = pd.Timestamp.now().normalize()
+    carrier_rates = {}
+
+    for _, row in route_matched.iterrows():
+        carrier = str(row.get('船公司简称', '')).strip()
+        if not carrier:
+            continue
+
+        # 判断合约有效期
+        effective_from = row.get('合约生效日期') if '合约生效日期' in row else None
+        effective_to = row.get('合约失效日期') if '合约失效日期' in row else None
+        is_valid = True
+        if pd.notna(effective_from) and today < effective_from:
+            is_valid = False
+        if pd.notna(effective_to) and today > effective_to:
+            is_valid = False
+
+        if carrier not in carrier_rates:
+            carrier_rates[carrier] = {'isValid': is_valid, 'rates': {}}
+        else:
+            # 如果已有记录且新的是有效的，保留有效的
+            if is_valid and not carrier_rates[carrier]['isValid']:
+                carrier_rates[carrier]['isValid'] = True
+
+        # 收集各箱型报价（取最低价）
+        for bt, col in box_col_map.items():
+            val = row[col]
+            if pd.notna(val) and float(val) > 0:
+                rate = float(val)
+                existing = carrier_rates[carrier]['rates'].get(bt)
+                if existing is None or rate < existing:
+                    carrier_rates[carrier]['rates'][bt] = rate
+
+        # 币种
+        if '币种' in row and pd.notna(row['币种']):
+            carrier_rates[carrier]['currency'] = str(row['币种'])
+
+    return carrier_rates
+
+
+@app.route('/api/freight-rate-compare', methods=['POST'])
+def compare_freight_rates():
+    """船公司海运费比价接口 — 返回各船公司的各箱型报价及总价排序
+
+    请求体 JSON:
+    {
+        "origin": "上海/SHANGHAI",
+        "destination": "洛杉矶/LOS ANGELES",
+        "boxTypes": {"40HQ": 5, "20GP": 3}
+    }
+    """
+    data = request.get_json()
+    if not data or 'boxTypes' not in data:
+        return jsonify({'error': '请求体不能为空，需要 boxTypes 参数'}), 400
+
+    origin = data.get('origin', '上海/SHANGHAI')
+    destination = data.get('destination', '洛杉矶/LOS ANGELES')
+    box_types_qty = data.get('boxTypes', {})
+    if not isinstance(box_types_qty, dict) or len(box_types_qty) == 0:
+        return jsonify({'error': 'boxTypes 必须是非空字典，如 {"40HQ": 5, "20GP": 3}'}), 400
+
+    df = _load_contract_data()
+    if df.empty:
+        return jsonify({'success': False, 'error': '合约运费文件未找到或加载失败'}), 500
+
+    # 获取各船公司的各箱型报价
+    carrier_rates = _contract_find_carrier_rates_multi(df, origin, destination, list(box_types_qty.keys()))
+
+    if not carrier_rates:
+        return jsonify({
+            'success': False,
+            'error': f'合约中未找到匹配航线: {origin} → {destination}',
+            'hint': '请调整起运港/目的港，或手动输入海运费',
+        }), 404
+
+    # 为每个船公司计算总价
+    usd_to_cny = 7.2
+    carriers = []
+    for carrier_name, info in carrier_rates.items():
+        total_cny = 0
+        per_type_detail = {}
+        has_all_types = True
+
+        for bt, qty in box_types_qty.items():
+            rate = info['rates'].get(bt)
+            if rate is None:
+                has_all_types = False
+                per_type_detail[bt] = {'rate': None, 'qty': qty, 'subtotalCny': None}
+            else:
+                currency = info.get('currency', 'USD')
+                rate_cny = rate * usd_to_cny if currency == 'USD' else rate
+                subtotal = round(rate_cny * qty, 2)
+                total_cny += subtotal
+                per_type_detail[bt] = {
+                    'rate': rate,
+                    'rateCny': round(rate_cny, 2),
+                    'qty': qty,
+                    'subtotalCny': subtotal,
+                    'currency': currency,
+                }
+
+        # 只有至少有一种箱型报价的船公司才加入比较
+        has_any_rate = any(d['rate'] is not None for d in per_type_detail.values())
+        if not has_any_rate:
+            continue
+
+        carriers.append({
+            'carrier': carrier_name,
+            'isValid': info['isValid'],
+            'totalCny': round(total_cny, 2),
+            'totalUsd': round(total_cny / usd_to_cny, 2),
+            'perTypeDetail': per_type_detail,
+            'hasAllTypes': has_all_types,
+            'currency': info.get('currency', 'USD'),
+        })
+
+    # 按总价升序排列（便宜的在前面），有效的优先
+    carriers.sort(key=lambda c: (0 if c['isValid'] else 1, c['totalCny']))
+
+    return jsonify({
+        'success': True,
+        'source': '合约信息导出0806.xlsx',
+        'data': {
+            'origin': origin,
+            'destination': destination,
+            'boxTypes': box_types_qty,
+            'carriers': carriers,
+            'carrierCount': len(carriers),
+            'cheapest': carriers[0] if carriers else None,
+            'fetchedAt': datetime.now().isoformat(),
+        }
+    })
+
+
+# ===== 高速费 LLM 估算接口 =====
+
+@app.route('/api/estimate-toll', methods=['POST'])
+def estimate_toll():
+    """调用LLM估算工厂自运到港口的高速公路通行费
+
+    请求体 JSON:
+    {
+        "province": "安徽",
+        "originPort": "上海/SHANGHAI",
+        "boxCount": 10,
+        "boxTypes": ["40HQ", "20GP"],
+        "weight": 15000,
+        "volume": 76
+    }
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请求体不能为空'}), 400
+
+    province = data.get('province', '')
+    origin_port = data.get('originPort', '上海/SHANGHAI')
+    box_count = int(data.get('boxCount', 1) or 1)
+    box_types = data.get('boxTypes', ['40HQ'])
+    weight = float(data.get('weight', 0) or 0)
+    volume = float(data.get('volume', 0) or 0)
+
+    if not province:
+        return jsonify({'error': '缺少 province 参数'}), 400
+
+    eng = get_engine()
+    toll = eng.llm_client.estimate_toll_fee(province, origin_port, box_count, box_types, weight, volume)
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'province': province,
+            'originPort': origin_port,
+            'boxCount': box_count,
+            'tollFee': toll,
+            'source': 'llm' if config.LLM_ENABLED else 'rule_engine',
+            'generatedAt': datetime.now().isoformat(),
+        }
     })
 
 
@@ -786,3 +1018,118 @@ if __name__ == '__main__':
     print("[预加载] 完成\n")
 
     app.run(host=config.HOST, port=config.PORT, debug=True)
+
+
+# ===== 港杂费推荐接口 =====
+
+# 港杂费标准表缓存
+_PORT_MISC_CACHE = None
+_PORT_MISC_CACHE_TIME = 0
+
+def _load_port_misc_data():
+    global _PORT_MISC_CACHE, _PORT_MISC_CACHE_TIME
+    now = __import__('time').time()
+    if _PORT_MISC_CACHE is not None and (now - _PORT_MISC_CACHE_TIME) < 3600:
+        return _PORT_MISC_CACHE
+    fpath = config.PORT_MISC_STANDARD_FILE
+    if not os.path.exists(fpath):
+        print(f"[港杂费标准] 文件不存在: {fpath}")
+        return pd.DataFrame()
+    try:
+        df = pd.read_excel(fpath, sheet_name=0)
+        _PORT_MISC_CACHE = df
+        _PORT_MISC_CACHE_TIME = now
+        print(f"[港杂费标准] 加载完成: {df.shape[0]} 条记录")
+        return df
+    except Exception as e:
+        print(f"[港杂费标准] 加载失败: {e}")
+        return pd.DataFrame()
+
+
+@app.route('/api/port-misc-fee', methods=['GET'])
+def get_port_misc_fee():
+    """港杂费推荐接口 — 根据始发港/贸易条款/箱型/承运商推荐港杂费
+
+    参数:
+        originPort  — 始发港（如 上海/SHANGHAI）
+        tradeTerm   — 贸易条款（FOB/CIF/DDP）
+        boxType     — 箱型（40HQ/20GP等）
+        carrier     — 承运商（可选，用于精确匹配）
+    """
+    origin = request.args.get('originPort', '')
+    trade_term = request.args.get('tradeTerm', 'FOB')
+    box_type = request.args.get('boxType', '40HQ')
+    carrier = request.args.get('carrier', '')
+
+    if not origin:
+        return jsonify({'error': '缺少 originPort 参数'}), 400
+
+    # 规范化箱型
+    bt = str(box_type).strip().upper()
+    if bt in ('40HC', '40HQ'): bt_norm = '40HQ'
+    elif bt in ('45HC', '45HQ'): bt_norm = '45HQ'
+    elif bt == '20GP': bt_norm = '20GP'
+    elif bt == '40GP': bt_norm = '40GP'
+    else: bt_norm = bt
+
+    df = _load_port_misc_data()
+    if df.empty:
+        return jsonify({'success': False, 'error': '港杂费标准文件未找到'}), 500
+
+    # 匹配始发港
+    origin_mask = df['始发港'].apply(lambda x: _contract_port_match(x, origin))
+    # 匹配贸易条款
+    term_mask = df['贸易条款'].str.strip().str.upper() == trade_term.strip().upper()
+    # 匹配箱型
+    box_mask = df['箱型'].str.strip().str.upper() == bt_norm
+
+    matched = df[origin_mask & term_mask & box_mask].copy()
+
+    if matched.empty:
+        # 宽松匹配：只用始发港+箱型
+        matched = df[origin_mask & box_mask].copy()
+
+    if matched.empty:
+        return jsonify({
+            'success': False,
+            'error': f'未找到匹配的港杂费标准: {origin} {trade_term} {bt_norm}',
+        }), 404
+
+    # 如果指定了承运商，优先匹配
+    if carrier:
+        carrier_lower = carrier.strip().lower()
+        carrier_matched = matched[matched['承运商'].str.lower().str.contains(carrier_lower, na=False)]
+        if not carrier_matched.empty:
+            matched = carrier_matched
+
+    # 按样本数降序排列，取前5条
+    matched = matched.sort_values('样本数', ascending=False).head(5)
+
+    recommendations = []
+    for _, row in matched.iterrows():
+        recommendations.append({
+            'carrier': row.get('承运商', ''),
+            'sampleCount': int(row.get('样本数', 0)),
+            'recommendedFee': float(row.get('推荐标准(中位数)', 0)),
+            'lowerBound': float(row.get('合理下限(P10)', 0)),
+            'upperBound': float(row.get('合理上限(P90)', 0)),
+            'avgFee': float(row.get('去离群后均值', 0)),
+            'dataLevel': row.get('数据等级', ''),
+        })
+
+    # 推荐值：取样本数最多的中位数，或所有推荐的中位数均值
+    best = recommendations[0]['recommendedFee'] if recommendations else 320
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'originPort': origin,
+            'tradeTerm': trade_term,
+            'boxType': bt_norm,
+            'recommendedFee': round(best, 2),
+            'recommendations': recommendations,
+            'totalMatched': len(matched),
+            'fetchedAt': datetime.now().isoformat(),
+        }
+    })
+
