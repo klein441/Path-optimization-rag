@@ -61,8 +61,12 @@ class LLMClient:
             origin_port = self.kb.get_best_origin_port(dest_country, factory_name)
             # 确定目的港
             dest_port = self.kb.get_best_dest_port(dest_country) or dest_country + "主港"
-            # 确定贸易条款
-            trade_term = self.kb.get_best_trade_term(dest_country)
+            # 确定贸易条款：优先使用用户指定条款，智能推荐时用历史最优
+            trade_pref = input_data.get('tradePref', 'auto')
+            if trade_pref and trade_pref not in ('auto', '智能推荐', ''):
+                trade_term = trade_pref
+            else:
+                trade_term = self.kb.get_best_trade_term(dest_country)
             # 确定箱型（支持多箱型）
             volume = float(input_data.get("volume", 0) or 0)
             weight = float(input_data.get("weight", 0) or 0)

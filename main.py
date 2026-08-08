@@ -1,14 +1,8 @@
 """
 物流运输路径智能优化系统 — 启动入口
 """
-import sys
-import os
-
-# 添加 back 目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'back'))
-
-from app import app, get_engine
-import config
+from back.app import app, get_engine
+from back import config
 
 
 def main():

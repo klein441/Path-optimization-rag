@@ -258,6 +258,22 @@ def _format_alt(a):
 
 # ===== 航线信息查询（产品→工厂→港口链路）=====
 
+def _clean_port_name(port_name):
+    """清理港口名称：去掉 LOCODE 前缀和多余的空格/斜杠"""
+    if not port_name:
+        return ''
+    name = str(port_name).strip()
+    # 处理 "CNSHA / 上海/SHANGHAI" 格式 → "上海/SHANGHAI"
+    if ' / ' in name:
+        parts = name.split(' / ', 1)
+        if len(parts) == 2 and len(parts[0]) <= 6:
+            name = parts[1]
+    # 去掉末尾的州代码后缀如 ",CA"
+    import re as _re
+    name = _re.sub(r',\s*[A-Z]{2}$', '', name)
+    return name.strip()
+
+
 @app.route('/api/route-info', methods=['GET'])
 def get_route_info():
     """
@@ -1048,18 +1064,21 @@ def _load_port_misc_data():
 
 @app.route('/api/port-misc-fee', methods=['GET'])
 def get_port_misc_fee():
-    """港杂费推荐接口 — 根据始发港/贸易条款/箱型/承运商推荐港杂费
+    """港杂费推荐接口 — 根据始发港/贸易条款/箱型推荐港杂费
 
     参数:
         originPort  — 始发港（如 上海/SHANGHAI）
-        tradeTerm   — 贸易条款（FOB/CIF/DDP）
+        tradeTerm   — 贸易条款（FOB/CIF/DDP），传 auto/智能推荐/空 时跳过贸易条款匹配
         boxType     — 箱型（40HQ/20GP等）
-        carrier     — 承运商（可选，用于精确匹配）
+
+    匹配逻辑:
+        1. 贸易条款为 auto/智能推荐/空 → 直接按 始发港 + 箱型 匹配
+        2. 否则按 始发港 + 贸易条款 + 箱型 匹配，无结果回退到 始发港 + 箱型
+        3. 优先选择数据等级为"标准"的行，取其中最便宜的推荐标准(中位数)
     """
     origin = request.args.get('originPort', '')
-    trade_term = request.args.get('tradeTerm', 'FOB')
+    trade_term = request.args.get('tradeTerm', '')
     box_type = request.args.get('boxType', '40HQ')
-    carrier = request.args.get('carrier', '')
 
     if not origin:
         return jsonify({'error': '缺少 originPort 参数'}), 400
@@ -1078,32 +1097,49 @@ def get_port_misc_fee():
 
     # 匹配始发港
     origin_mask = df['始发港'].apply(lambda x: _contract_port_match(x, origin))
-    # 匹配贸易条款
-    term_mask = df['贸易条款'].str.strip().str.upper() == trade_term.strip().upper()
     # 匹配箱型
     box_mask = df['箱型'].str.strip().str.upper() == bt_norm
 
-    matched = df[origin_mask & term_mask & box_mask].copy()
+    # 判断是否需要按贸易条款匹配
+    skip_term = (not trade_term or trade_term.strip() in ('auto', '智能推荐'))
+    match_desc = f'{origin} / {bt_norm}'
 
-    if matched.empty:
-        # 宽松匹配：只用始发港+箱型
+    if not skip_term:
+        # 三键匹配：始发港 + 贸易条款 + 箱型
+        term_mask = df['贸易条款'].str.strip().str.upper() == trade_term.strip().upper()
+        matched = df[origin_mask & term_mask & box_mask].copy()
+        match_desc = f'{origin} / {trade_term} / {bt_norm}'
+        if matched.empty:
+            # 回退：三键无结果 → 两键（始发港 + 箱型）
+            matched = df[origin_mask & box_mask].copy()
+            match_desc = f'{origin} / {bt_norm}（回退，贸易条款{trade_term}无匹配）'
+    else:
+        # 贸易条款为 auto/智能推荐/空，直接用始发港 + 箱型匹配
         matched = df[origin_mask & box_mask].copy()
+        match_desc = f'{origin} / {bt_norm}（贸易条款=auto，跳过）'
 
     if matched.empty:
+        print(f'[港杂费] 无匹配: {match_desc}')
         return jsonify({
             'success': False,
-            'error': f'未找到匹配的港杂费标准: {origin} {trade_term} {bt_norm}',
+            'error': f'未找到匹配的港杂费标准: {match_desc}',
         }), 404
 
-    # 如果指定了承运商，优先匹配
-    if carrier:
-        carrier_lower = carrier.strip().lower()
-        carrier_matched = matched[matched['承运商'].str.lower().str.contains(carrier_lower, na=False)]
-        if not carrier_matched.empty:
-            matched = carrier_matched
+    # 优先选择数据等级为"标准"的行，取其中最便宜的推荐标准(中位数)
+    standard_rows = matched[matched['数据等级'].str.strip() == '标准']
+    if not standard_rows.empty:
+        matched_for_best = standard_rows
+        used_level = '标准'
+    else:
+        matched_for_best = matched
+        used_level = matched['数据等级'].iloc[0] if len(matched) > 0 else '参考'
 
-    # 按样本数降序排列，取前5条
-    matched = matched.sort_values('样本数', ascending=False).head(5)
+    best_row = matched_for_best.loc[matched_for_best['推荐标准(中位数)'].idxmin()]
+    best_fee = float(best_row['推荐标准(中位数)'])
+
+    # 返回所有匹配行（按数据等级排序：标准优先，再按费用升序）
+    matched['_sort_level'] = matched['数据等级'].apply(lambda x: 0 if str(x).strip() == '标准' else 1)
+    matched = matched.sort_values(['_sort_level', '推荐标准(中位数)']).drop(columns=['_sort_level'])
 
     recommendations = []
     for _, row in matched.iterrows():
@@ -1117,8 +1153,8 @@ def get_port_misc_fee():
             'dataLevel': row.get('数据等级', ''),
         })
 
-    # 推荐值：取样本数最多的中位数，或所有推荐的中位数均值
-    best = recommendations[0]['recommendedFee'] if recommendations else 320
+    # 推荐值：数据等级"标准"中最便宜的推荐标准(中位数)
+    best = best_fee
 
     return jsonify({
         'success': True,
@@ -1127,8 +1163,192 @@ def get_port_misc_fee():
             'tradeTerm': trade_term,
             'boxType': bt_norm,
             'recommendedFee': round(best, 2),
+            'usedLevel': used_level,
+            'bestCarrier': str(best_row.get('承运商', '')),
             'recommendations': recommendations,
             'totalMatched': len(matched),
+            'fetchedAt': datetime.now().isoformat(),
+        }
+    })
+
+
+# ===== 陆运费推荐（各路线报价卡） =====
+
+_ROUTE_PRICING_CACHE = None
+_ROUTE_PRICING_CACHE_TIME = None
+_ROUTE_PRICING_CACHE_TTL = 600  # 10分钟缓存
+
+
+def _load_route_pricing_data():
+    """加载各路线报价卡 Excel 文件（带缓存）"""
+    global _ROUTE_PRICING_CACHE, _ROUTE_PRICING_CACHE_TIME
+    now = time.time()
+    if _ROUTE_PRICING_CACHE is not None and _ROUTE_PRICING_CACHE_TIME is not None:
+        if now - _ROUTE_PRICING_CACHE_TIME < _ROUTE_PRICING_CACHE_TTL:
+            return _ROUTE_PRICING_CACHE
+    fpath = config.ROUTE_PRICING_FILE
+    if not os.path.exists(fpath):
+        print(f"[路线报价卡] 文件不存在: {fpath}")
+        return None
+    try:
+        xl = pd.ExcelFile(fpath)
+        _ROUTE_PRICING_CACHE = xl
+        _ROUTE_PRICING_CACHE_TIME = now
+        print(f"[路线报价卡] 加载完成: {len(xl.sheet_names)} 个 Sheet")
+        return xl
+    except Exception as e:
+        print(f"[路线报价卡] 加载失败: {e}")
+        return None
+
+
+def _find_route_sheet(xl, factory_name, origin_port):
+    """在 Excel 的所有 Sheet 中查找匹配工厂+始发港的 Sheet"""
+    if xl is None:
+        return None
+
+    import re
+    # 提取工厂核心名称（去掉后缀差异：用品/制品/科技等）
+    factory_core = factory_name
+    match = re.search(r'(.+英科.+?)(?:医疗|用品|制品|科技|卫生|印刷).*$', factory_name)
+    if match:
+        factory_core = match.group(1)
+
+    # 提取始发港中文名
+    port_short = origin_port.split('/')[0] if '/' in origin_port else origin_port
+
+    candidates = []
+    for sname in xl.sheet_names:
+        # 跳过说明/汇总 Sheet（00-04 和 99 开头的 Sheet）
+        prefix = sname.split('_')[0] if '_' in sname else ''
+        if prefix in ('00', '01', '02', '03', '04', '99'):
+            continue
+        # 检查 Sheet 名是否包含港口名
+        if port_short not in sname:
+            continue
+        # 检查 Sheet 名是否包含工厂名（精确或核心部分）
+        if factory_name in sname:
+            candidates.append((sname, 2))
+        elif factory_core and factory_core in sname:
+            candidates.append((sname, 1))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates[0][0]
+
+
+# 运输方式映射（前端值 → Excel 中文值）
+TRANSPORT_MODE_MAP = {
+    'direct': '直拖',
+    'seaRail': '海铁',
+    'factorySelf': '工厂自运',
+    'landToWater': '陆改水',
+}
+
+
+@app.route('/api/land-freight', methods=['GET'])
+def get_land_freight():
+    """陆运费推荐接口 — 根据发货工厂/始发港/运输方式推荐陆运费"""
+    factory = request.args.get('factory', '')
+    origin_port = request.args.get('originPort', '')
+    transport_mode = request.args.get('transportMode', 'direct')
+    box_type = request.args.get('boxType', '40HQ')
+
+    if not factory:
+        return jsonify({'error': '缺少 factory 参数'}), 400
+    if not origin_port:
+        return jsonify({'error': '缺少 originPort 参数'}), 400
+
+    mode_cn = TRANSPORT_MODE_MAP.get(transport_mode, transport_mode)
+    bt = str(box_type).strip().upper()
+
+    xl = _load_route_pricing_data()
+    if xl is None:
+        return jsonify({'success': False, 'error': '各路线报价卡文件未找到'}), 500
+
+    sheet_name = _find_route_sheet(xl, factory, origin_port)
+    if sheet_name is None:
+        return jsonify({
+            'success': False,
+            'error': f'未找到匹配的路线报价 Sheet: 工厂={factory}, 港口={origin_port}',
+        }), 404
+
+    try:
+        df = pd.read_excel(xl, sheet_name=sheet_name)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'读取 Sheet 失败: {str(e)}'}), 500
+
+    if df.empty or df.shape[1] < 5:
+        return jsonify({'success': False, 'error': f'Sheet [{sheet_name}] 数据为空'}), 404
+
+    # 列结构: 0=运输方式, 1=公司, 2=箱型, 3=样本数, 4=陆运费中位数(元)
+    #         5=高速费中位数(元), 6=陆运+高速中位数(元), 7=陆运+高速均值(元)
+    col_mode = df.columns[0]
+    col_box = df.columns[2]
+    col_land_median = df.columns[4]
+    col_toll_median = df.columns[5]
+
+    # 按运输方式筛选
+    mode_mask = df[col_mode].astype(str).str.strip() == mode_cn
+    mode_matched = df[mode_mask]
+
+    if mode_matched.empty:
+        mode_mask = df[col_mode].astype(str).str.contains(mode_cn, na=False)
+        mode_matched = df[mode_mask]
+
+    if mode_matched.empty:
+        all_modes = df[col_mode].dropna().unique().tolist()
+        return jsonify({
+            'success': False,
+            'error': f'Sheet [{sheet_name}] 中未找到运输方式 [{mode_cn}]，可用: {all_modes}',
+        }), 404
+
+    # 按箱型筛选；无匹配时放宽
+    box_mask = mode_matched[col_box].astype(str).str.strip().str.upper() == bt
+    if box_mask.any():
+        candidates = mode_matched[box_mask].copy()
+    else:
+        candidates = mode_matched.copy()
+
+    if candidates.empty:
+        return jsonify({
+            'success': False,
+            'error': f'Sheet [{sheet_name}] 中未找到运输方式[{mode_cn}]箱型[{bt}]的数据',
+        }), 404
+
+    # 取 陆运费中位数(元) 最小的行
+    best_idx = candidates[col_land_median].idxmin()
+    best_row = candidates.loc[best_idx]
+    best_land_fee = float(best_row[col_land_median])
+    best_toll_fee = float(best_row[col_toll_median]) if pd.notna(best_row[col_toll_median]) else 0
+
+    candidates_sorted = candidates.sort_values(col_land_median)
+    all_quotes = []
+    for _, row in candidates_sorted.head(20).iterrows():
+        all_quotes.append({
+            'carrier': str(row.get(df.columns[1], '')) if df.shape[1] > 1 else '',
+            'boxType': str(row.get(col_box, '')),
+            'sampleCount': int(row.get(df.columns[3], 0)) if df.shape[1] > 3 and pd.notna(row.get(df.columns[3])) else 0,
+            'landFreightMedian': float(row.get(col_land_median, 0)) if pd.notna(row.get(col_land_median)) else 0,
+            'tollFreightMedian': float(row.get(col_toll_median, 0)) if pd.notna(row.get(col_toll_median)) else 0,
+        })
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'factory': factory,
+            'originPort': origin_port,
+            'transportMode': transport_mode,
+            'transportModeCn': mode_cn,
+            'boxType': bt,
+            'sheetName': sheet_name,
+            'recommendedLandFreight': round(best_land_fee, 2),
+            'recommendedTollFreight': round(best_toll_fee, 2),
+            'recommendedCarrier': str(best_row.get(df.columns[1], '')),
+            'sampleCount': int(best_row.get(df.columns[3], 0)) if pd.notna(best_row.get(df.columns[3])) else 0,
+            'allQuotes': all_quotes,
+            'totalMatched': len(candidates),
             'fetchedAt': datetime.now().isoformat(),
         }
     })

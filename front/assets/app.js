@@ -437,7 +437,8 @@ function setupFeeCalculations() {
     const insideUnit = insideFee?.nextElementSibling;
 
     transportMode.addEventListener('change', () => {
-        initLandFees(feeData.land.factoryProvince, transportMode.value);
+        initLandFees(feeData.land.factoryProvince, transportMode.value,
+                     feeData.land.factoryName || '', feeData.land.originPort || '');
         // 工厂自运时智能计算高速费
         if (transportMode.value === 'factorySelf') {
             calculateTollFee();
@@ -555,8 +556,11 @@ function setupFeeCalculations() {
 }
 
 // ===== 陆运费初始化（根据工厂省份和运输方式自动推荐）=====
-function initLandFees(province, mode) {
+// factoryName 和 originPort 可选：传入时从各路线报价卡实时查询陆运费
+function initLandFees(province, mode, factoryName, originPort) {
     feeData.land.factoryProvince = province || '';
+    if (factoryName) feeData.land.factoryName = factoryName;
+    if (originPort) feeData.land.originPort = originPort;
     const transportMode = document.getElementById('transportModeSelect');
     const baseFreightInput = document.getElementById('landBaseFreight');
     const tollItem = document.getElementById('tollFeeItem');
@@ -579,9 +583,13 @@ function initLandFees(province, mode) {
     transportMode.value = mode;
     feeData.land.transportMode = mode;
 
-    // 推荐陆运费
+    // 推荐陆运费：优先从各路线报价卡实时查询，fallback 到默认值
     feeData.land.baseFreight = conf.baseFreight;
     baseFreightInput.value = conf.baseFreight;
+
+    if (factoryName && originPort) {
+        fetchLandFreightFromRoute(factoryName, originPort, mode);
+    }
 
     // 高速费（仅工厂自运，智能计算）
     if (conf.hasToll) {
@@ -1201,8 +1209,8 @@ function renderCarrierAndShipping(p) {
 
     let carrierHtml = '';
     if (carrier.recommended) {
-        const typeColor = carrier.type === '自有' ? 'var(--success, #10b981)' : 'var(--accent2, #f59e0b)';
-        const typeBg = carrier.type === '自有' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)';
+        const typeColor = carrier.type === '自有' ? 'var(--success, #16a34a)' : 'var(--accent, #B8860B)';
+        const typeBg = carrier.type === '自有' ? 'rgba(22,163,74,0.1)' : 'rgba(184,134,11,0.1)';
         carrierHtml = `
             <div class="cs-card">
                 <div class="cs-card-header">
@@ -1242,7 +1250,7 @@ function renderCarrierAndShipping(p) {
                 <div class="cs-card-body">
                     <div class="cs-primary">
                         <span class="cs-name">${shippingLine.name}</span>
-                        <span class="cs-tag" style="background:rgba(31,58,95,0.1);color:var(--primary,#1F3A5F)">${shippingLine.code || ''}</span>
+                        <span class="cs-tag" style="background:rgba(184,134,11,0.1);color:var(--accent,#B8860B)">${shippingLine.code || ''}</span>
                     </div>
                     <div class="cs-meta">
                         <span>航程 ${shippingLine.transit_days || '?'} 天</span>
@@ -1468,8 +1476,9 @@ async function fetchOceanFreightRate() {
                 routeInfo.factoryShort, '→', origin, '→', destination,
                 '| 推荐航司:', routeInfo.recommendedShippingLine?.name || '无');
 
-            // 自动推荐陆运费（根据工厂省份）
-            initLandFees(routeInfo.factoryProvince, 'direct');
+            // 自动推荐陆运费（根据工厂省份+路线报价卡）
+            initLandFees(routeInfo.factoryProvince, 'direct',
+                         routeInfo.factory || '', routeInfo.originPort || '');
 
             // 更新推荐航线信息卡片
             updateRouteInfoCard(routeInfo.factoryShort || routeInfo.factory || '',
@@ -1753,6 +1762,53 @@ async function fetchPortMiscFee(originPort, tradeTerm, boxTypes) {
         }
     } catch (e) {
         console.warn('[港杂费] 查询失败:', e.message);
+    }
+}
+
+// 陆运费推荐（从各路线报价卡实时查询）
+async function fetchLandFreightFromRoute(factoryName, originPort, transportMode) {
+    if (!factoryName || !originPort) return;
+    var boxTypes = getMultiSelectValues('boxTypeMulti');
+    var bt = (boxTypes && boxTypes.length > 0) ? boxTypes[0] : '40HQ';
+
+    try {
+        var url = API_BASE + '/api/land-freight?factory=' + encodeURIComponent(factoryName) +
+            '&originPort=' + encodeURIComponent(originPort) +
+            '&transportMode=' + encodeURIComponent(transportMode || 'direct') +
+            '&boxType=' + encodeURIComponent(bt);
+        var resp = await fetch(url);
+        var result = await resp.json();
+        if (result.success && result.data) {
+            var d = result.data;
+            var landFee = d.recommendedLandFreight;
+            var tollFeeRec = d.recommendedTollFreight || 0;
+
+            // 更新陆运费输入框
+            var baseFreightInput = document.getElementById('landBaseFreight');
+            if (baseFreightInput && landFee > 0) {
+                baseFreightInput.value = landFee;
+                feeData.land.baseFreight = landFee;
+            }
+
+            // 更新高速费（如果报价卡有高速费数据）
+            if (tollFeeRec > 0) {
+                var tollFeeInput = document.getElementById('landTollFee');
+                if (tollFeeInput) {
+                    tollFeeInput.value = tollFeeRec;
+                    feeData.land.tollFee = tollFeeRec;
+                }
+            }
+
+            updateGrandTotal();
+
+            console.log('[陆运费] 路线报价卡推荐:', factoryName, originPort, transportMode,
+                '陆运费¥' + landFee, '高速费¥' + tollFeeRec,
+                '(Sheet: ' + d.sheetName + ', ' + d.totalMatched + '条记录)');
+        } else {
+            console.warn('[陆运费] 路线报价卡未匹配:', result.error || '无数据，使用默认值');
+        }
+    } catch (e) {
+        console.warn('[陆运费] 查询失败:', e.message);
     }
 }
 

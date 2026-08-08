@@ -135,3 +135,6 @@ BOX_TYPE_VOLUME = {
 }
 
 PORT_MISC_STANDARD_FILE = os.path.join(DATA_DIR, "港杂费标准_贸易条款承运商箱型港口.xlsx")
+
+# 各路线报价卡 — 用于陆运费推荐（按工厂+港口+运输方式匹配）
+ROUTE_PRICING_FILE = os.path.join(DATA_DIR, "各路线报价卡.xlsx")
