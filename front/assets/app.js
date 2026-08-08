@@ -1737,7 +1737,8 @@ function getOceanPortsByCountry(country) {
 async function fetchPortMiscFee(originPort, tradeTerm, boxTypes) {
     if (!originPort || originPort === '—') return;
     var bt = (boxTypes && boxTypes.length > 0) ? boxTypes[0] : '40HQ';
-    var tt = tradeTerm || 'FOB';
+    // 智能推荐/空时不传 tradeTerm，让后端跳过贸易条款匹配
+    var tt = (tradeTerm && tradeTerm !== 'auto' && tradeTerm !== '智能推荐') ? tradeTerm : '';
 
     try {
         var url = API_BASE + '/api/port-misc-fee?originPort=' + encodeURIComponent(originPort) +
@@ -1909,11 +1910,14 @@ function renderFeePanel(data) {
     autoEnableICS2ForEurope();
     setTimeout(function() {
         fetchOceanFreightRate();
-        // 港杂费推荐：从路线信息条获取始发港和贸易条款
-        var originPort = document.getElementById('routeInfoOrigin')?.textContent || '';
-        var tradeTerm = (data.primary && data.primary.tradeTerm) ? data.primary.tradeTerm : 'FOB';
+        // 港杂费推荐：直接从 data 对象取（不从 DOM 读，因为 fetchOceanFreightRate 异步未完成）
+        var originPort = (data.primary && data.primary.departurePort) ? data.primary.departurePort : '';
+        var tradeTerm = (data.primary && data.primary.tradeTerm) ? data.primary.tradeTerm : '';
+        if (tradeTerm === 'auto' || tradeTerm === '智能推荐') tradeTerm = '';
         var boxTypes = getMultiSelectValues('boxTypeMulti');
-        fetchPortMiscFee(originPort, tradeTerm, boxTypes);
+        if (originPort) {
+            fetchPortMiscFee(originPort, tradeTerm, boxTypes);
+        }
     }, 400);
 }
 
