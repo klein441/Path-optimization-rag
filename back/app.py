@@ -15,6 +15,14 @@ import sys
 import os
 import time
 import json as json_module
+
+# 兼容重定向输出：日志中无法按 GBK 编码的字符（如 ¥/✓/⚠）替换而不是丢出异常
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(errors='replace')
+        sys.stderr.reconfigure(errors='replace')
+except Exception:
+    pass
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from flask_cors import CORS
