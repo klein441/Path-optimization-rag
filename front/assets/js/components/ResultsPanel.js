@@ -110,21 +110,6 @@ export default {
             const d = store.results.data || {};
             return d.source === 'llm' ? 'AI 生成' : '规则引擎';
         },
-        // ===== 全部路线表 =====
-        sortedRoutes() {
-            const candidates = store.results.allCandidates || [];
-            const key = store.allRoutesSortKey;
-            const desc = store.allRoutesSortDesc;
-            return candidates.slice().sort((a, b) => {
-                const va = a[key];
-                const vb = b[key];
-                if (typeof va === 'string') return desc ? vb.localeCompare(va) : va.localeCompare(vb);
-                return desc ? (vb - va) : (va - vb);
-            });
-        },
-        minCost() {
-            return Math.min.apply(null, (store.results.allCandidates || []).map(c => c.totalCostCny || 0));
-        },
         routesCount() {
             return (store.results.allCandidates || []).length;
         },
@@ -133,47 +118,19 @@ export default {
         usdText(n) {
             return '$' + Number(n).toLocaleString();
         },
-        portShort(port) {
-            return port ? port.split('/')[0] : '—';
-        },
         altCost(alt) {
             return alt.totalCostCny || (alt.cost && alt.cost.totalCny) || 0;
         },
-        isPrimaryRoute(c) {
-            const pd = this.primary;
-            if (!pd) return false;
-            return (c.factoryShort || c.factory || '') === (pd.factoryShort || pd.factory || '') &&
-                   (c.departurePort || '') === (pd.departurePort || '') &&
-                   (c.destPort || '') === (pd.destPort || '');
-        },
-        isLowest(c) {
-            return c.totalCostCny === this.minCost;
-        },
-        sortBy(key) {
-            if (store.allRoutesSortKey === key) {
-                store.allRoutesSortDesc = !store.allRoutesSortDesc;
-            } else {
-                store.allRoutesSortKey = key;
-                store.allRoutesSortDesc = true;
+        openAllRoutes() {
+            try {
+                localStorage.setItem('allRoutesData', JSON.stringify({
+                    candidates: store.results.allCandidates || [],
+                    primary: store.results.primary || {},
+                }));
+            } catch (e) {
+                console.error('[全部路线] 数据保存失败:', e);
             }
-        },
-        sourceLabel(c) {
-            return c.pricingSource === 'llm' ? 'LLM' : c.pricingSource === 'contract' ? '合约' : '规则';
-        },
-        sourceClass(c) {
-            return c.pricingSource === 'llm' ? 'source-llm' : c.pricingSource === 'contract' ? 'source-contract' : 'source-rule';
-        },
-        qualityClass(c) {
-            return c.dataQuality === 'high' ? 'quality-high'
-                 : c.dataQuality === 'low' ? 'quality-low'
-                 : c.dataQuality === 'llm' ? 'source-llm'
-                 : 'quality-medium';
-        },
-        qualityLabel(c) {
-            return c.dataQuality === 'high' ? '高'
-                 : c.dataQuality === 'low' ? '低'
-                 : c.dataQuality === 'llm' ? 'LLM'
-                 : '中';
+            window.open('all-routes.html', '_blank');
         },
     },
     template: `
@@ -315,6 +272,14 @@ export default {
             </div>
           </div>
 
+          <!-- 全部路线价格对比入口 -->
+          <div class="all-routes-entry" v-if="routesCount > 0">
+            <button type="button" class="all-routes-btn" @click="openAllRoutes">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+              全部路线价格对比
+              <span class="count">{{ routesCount }} 条路线</span>
+            </button>
+          </div>
           <!-- 承运商和船公司 -->
           <div class="carrier-shipping-section" v-if="hasCarrierShipping">
             <div class="cs-grid">
@@ -429,43 +394,6 @@ export default {
                 </div>
               </div>
             </div>
-          </div>
-
-          <!-- 全部路线价格对比表 -->
-          <div class="all-routes-section" v-if="routesCount > 0">
-            <div class="all-routes-header">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-              全部路线价格对比
-              <span class="count">{{ routesCount }} 条路线</span>
-            </div>
-            <table class="all-routes-table">
-              <thead>
-                <tr>
-                  <th data-sort="factoryShort" style="min-width:180px" @click="sortBy('factoryShort')">路线<span class="sort-ind" v-if="store.allRoutesSortKey === 'factoryShort'">{{ store.allRoutesSortDesc ? '▼' : '▲' }}</span></th>
-                  <th data-sort="tradeTerm" @click="sortBy('tradeTerm')">条款<span class="sort-ind" v-if="store.allRoutesSortKey === 'tradeTerm'">{{ store.allRoutesSortDesc ? '▼' : '▲' }}</span></th>
-                  <th data-sort="totalCostCny" style="text-align:right" @click="sortBy('totalCostCny')">总费用(CNY)<span class="sort-ind" v-if="store.allRoutesSortKey === 'totalCostCny'">{{ store.allRoutesSortDesc ? '▼' : '▲' }}</span></th>
-                  <th data-sort="totalDays" style="text-align:center" @click="sortBy('totalDays')">时效<span class="sort-ind" v-if="store.allRoutesSortKey === 'totalDays'">{{ store.allRoutesSortDesc ? '▼' : '▲' }}</span></th>
-                  <th data-sort="score" style="text-align:center" @click="sortBy('score')">评分<span class="sort-ind" v-if="store.allRoutesSortKey === 'score'">{{ store.allRoutesSortDesc ? '▼' : '▲' }}</span></th>
-                  <th style="text-align:center">价格来源</th>
-                  <th style="text-align:center">数据质量</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(c, idx) in sortedRoutes" :key="idx">
-                  <td class="route-cell">
-                    <span class="best-badge" v-if="isPrimaryRoute(c)">最优</span>
-                    <span class="best-badge" style="background:#0891b2" v-if="isLowest(c) && !isPrimaryRoute(c)">最低</span>
-                    {{ c.factoryShort || c.factory }} <span class="sep">→</span> {{ portShort(c.departurePort) }} <span class="sep">→</span> {{ portShort(c.destPort) }}
-                  </td>
-                  <td>{{ c.tradeTerm || '—' }}</td>
-                  <td class="cost-cell">¥{{ (c.totalCostCny || 0).toLocaleString() }}</td>
-                  <td class="days-cell">{{ c.totalDays || '?' }}天</td>
-                  <td class="score-cell">{{ c.score || 0 }}</td>
-                  <td><span class="source-tag" :class="sourceClass(c)">{{ sourceLabel(c) }}</span></td>
-                  <td style="text-align:center"><span :class="qualityClass(c)">{{ qualityLabel(c) }}</span></td>
-                </tr>
-              </tbody>
-            </table>
           </div>
 
         </div>

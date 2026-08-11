@@ -19,7 +19,6 @@ export function selectOceanCarrier(carrier) {
     if (!carrier) return;
     if (store.feeConfirmed) return; // 费用已确认，不允许再切换船公司
     store.feeData.ocean.fee = carrier.totalCny;
-    store.feeModified['海运费'] = true; // 用户选择船公司视为手动修改海运费
     store.feeData.ocean.selectedCarrier = carrier;
     store.feeData.ocean.allCarriers = store.ocean.carriers;
     store.ocean.medianRateText = '$' + Number(carrier.totalUsd).toLocaleString();

@@ -56,20 +56,7 @@
 .fee-edit-total-label{font-family:var(--font-display);font-size:0.95rem;font-weight:600;color:var(--ink)}
 #feeEditTotal{font-family:var(--font-display);font-size:1.15rem;font-weight:600;color:var(--accent)}
 .fee-edit-total-usd{font-size:0.74rem;color:var(--muted);margin-left:0.3rem;font-family:var(--font-mono)}
-.reoptimize-btn{
-  width:100%;padding:0.75rem;font-size:0.88rem;font-weight:600;font-family:var(--font-body);
-  color:#fff;background:linear-gradient(135deg,#B8860B,#D4A84B);
-  border:none;border-radius:var(--radius-md);cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:transform .2s ease-out,box-shadow .2s ease-out;margin-top:0.5rem;touch-action:manipulation;min-height:44px;
-  box-shadow:0 4px 14px rgba(184,134,11,0.25);
-}
-.reoptimize-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(184,134,11,0.35)}
-.reoptimize-btn:active{transform:translateY(0)}
-
-/* ===== 重新优化 + 费用信息确认 按钮组 ===== */
 .fee-actions{display:flex;gap:0.6rem;margin-top:0.6rem;align-items:stretch}
-.fee-actions .reoptimize-btn{flex:1;margin-top:0}
 .confirm-fee-btn{
   flex:1;padding:0.75rem;font-size:0.88rem;font-weight:600;font-family:var(--font-body);
   color:#fff;background:linear-gradient(135deg,#166534,#22c55e);

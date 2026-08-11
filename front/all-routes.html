@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全部路线价格对比 - 物流运输路径智能优化系统</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/results.css">
+<link rel="stylesheet" href="assets/css/all-routes.css">
+</head>
+<body>
+<div class="all-routes-page">
+  <header class="ar-header">
+    <div>
+      <h1>全部路线价格对比</h1>
+      <p class="ar-sub" id="arCount">加载中...</p>
+    </div>
+    <button type="button" class="ar-back" onclick="location.href='/'">返回首页</button>
+  </header>
+  <div class="ar-body">
+    <table class="all-routes-table" id="arTable">
+      <thead>
+        <tr>
+          <th data-key="badge" style="text-align:center">标签</th>
+          <th data-key="factoryShort" style="min-width:220px">路线</th>
+          <th data-key="tradeTerm">条款</th>
+          <th data-key="totalCostCny" style="text-align:right">总费用(CNY)</th>
+          <th data-key="totalDays" style="text-align:center">时效</th>
+          <th data-key="score" style="text-align:center">评分</th>
+          <th style="text-align:center">价格来源</th>
+          <th style="text-align:center">数据质量</th>
+        </tr>
+      </thead>
+      <tbody id="arTbody"></tbody>
+    </table>
+    <div class="ar-empty" id="arEmpty" style="display:none">暂无路线数据，请先在首页提交获取推荐方案后，再点击“全部路线价格对比”查看。</div>
+  </div>
+</div>
+<script src="assets/js/all-routes.js"></script>
+</body>
+</html>

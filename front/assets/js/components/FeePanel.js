@@ -9,7 +9,6 @@ import { formatFee, autoEnableICS2ForEurope, showNotification } from '../utils.j
 import { initLandFees, calculateTollFee, getSeaManagerTotal, getOtherTotal, calculateAllFees } from '../fees.js';
 import { fetchPortMiscFee } from '../api.js';
 import { fetchOceanFreightRate } from '../ocean.js';
-import { reOptimize } from '../submit.js';
 import OceanQuotes from './OceanQuotes.js';
 
 export default {
@@ -62,7 +61,6 @@ export default {
             }
         },
         onTransportModeChange() {
-            store.feeModified['陆运费'] = true;
             const l = store.feeData.land;
             initLandFees(l.factoryProvince, l.transportMode, l.factoryName, l.originPort);
             if (l.transportMode === 'factorySelf') {
@@ -70,32 +68,24 @@ export default {
             }
         },
         onManifestModeChange() {
-            store.feeModified['舱单费'] = true;
             const sm = store.feeData.seaManager;
             if (sm.manifestMode !== 'custom') {
                 sm.manifestFee = parseFloat(sm.manifestMode) || 0;
             }
         },
         onIcs2Toggle() {
-            store.feeModified['ICS2费'] = true;
             if (!store.feeData.seaManager.ics2Enabled) {
                 store.feeData.seaManager.ics2Fee = 0;
             }
         },
         addOtherRow() {
             store.feeData.other.push({ name: '', amount: 0 });
-            store.feeModified.__other__ = true;
         },
         removeOther(idx) {
             store.feeData.other.splice(idx, 1);
-            store.feeModified.__other__ = true;
         },
         refresh() {
             fetchOceanFreightRate();
-        },
-        onReOptimize() {
-            store.feeConfirmed = false;
-            reOptimize();
         },
         confirmFees() {
             store.feeConfirmed = true;
@@ -105,24 +95,16 @@ export default {
         unlockFees() {
             store.feeConfirmed = false;
         },
-        markModified(key) {
-            store.feeModified[key] = true;
-        },
-        markOtherModified() {
-            store.feeModified.__other__ = true;
-        },
         onTollToggle(ev) {
             store.feeData.land.tollEnabled = ev.target.checked;
-            store.feeModified['高速费'] = true;
         },
         onInsideToggle(ev) {
             store.feeData.land.insideLoadEnabled = ev.target.checked;
-            store.feeModified['内装费'] = true;
         },
     },
     template: `
         <div id="feePanelInResults" class="fee-panel-in-results">
-          <h3 style="font-size:0.9rem;font-weight:700;color:var(--ink);margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem"><span>💰</span> 费用信息确认（修改后点重新优化）</h3>
+          <h3 style="font-size:0.9rem;font-weight:700;color:var(--ink);margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem"><span>💰</span> 费用信息确认</h3>
 
           <div class="fee-confirmed-banner" v-if="store.feeConfirmed">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
@@ -149,7 +131,7 @@ export default {
               </div>
               <div class="fee-item">
                 <div class="fee-item-label">陆运费</div>
-                <input type="number" class="fee-item-input" id="fpLandBaseFreight" v-model.number="store.feeData.land.baseFreight" step="0.1" min="0" @change="markModified('陆运费')" :disabled="store.feeConfirmed">
+                <input type="number" class="fee-item-input" id="fpLandBaseFreight" v-model.number="store.feeData.land.baseFreight" step="0.1" min="0" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit">元</span>
               </div>
               <div class="fee-item" v-show="modeConf.hasToll">
@@ -158,7 +140,7 @@ export default {
                   <label class="toggle-switch"><input type="checkbox" :checked="store.feeData.land.tollEnabled" @change="onTollToggle($event)" :disabled="store.feeConfirmed"><span class="toggle-slider"></span></label>
                   <span class="toggle-label">产生</span>
                 </div>
-                <input type="number" class="fee-item-input small" id="fpLandTollFee" v-model.number="store.feeData.land.tollFee" step="0.1" min="0" @change="markModified('高速费')" :disabled="store.feeConfirmed">
+                <input type="number" class="fee-item-input small" id="fpLandTollFee" v-model.number="store.feeData.land.tollFee" step="0.1" min="0" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit">元</span>
               </div>
               <div class="fee-item" v-show="insideVisible">
@@ -167,7 +149,7 @@ export default {
                   <label class="toggle-switch"><input type="checkbox" :checked="store.feeData.land.insideLoadEnabled" @change="onInsideToggle($event)" :disabled="store.feeConfirmed"><span class="toggle-slider"></span></label>
                   <span class="toggle-label">需要</span>
                 </div>
-                <input type="number" class="fee-item-input small" id="fpInsideLoadFee" v-model.number="store.feeData.land.insideLoadFee" step="0.1" min="0" @change="markModified('内装费')" :disabled="store.feeConfirmed">
+                <input type="number" class="fee-item-input small" id="fpInsideLoadFee" v-model.number="store.feeData.land.insideLoadFee" step="0.1" min="0" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit">元</span>
               </div>
             </div>
@@ -188,12 +170,12 @@ export default {
                   <option v-for="v in [55,25,35,80]" :key="v" :value="String(v)">{{ v }}</option>
                   <option value="custom">自定义</option>
                 </select>
-                <input type="number" class="fee-item-input small" id="fpManifestCustom" placeholder="自定义" step="0.1" min="0" v-if="store.feeData.seaManager.manifestMode === 'custom'" v-model.number="store.feeData.seaManager.manifestFee" @change="markModified('舱单费')" :disabled="store.feeConfirmed">
+                <input type="number" class="fee-item-input small" id="fpManifestCustom" placeholder="自定义" step="0.1" min="0" v-if="store.feeData.seaManager.manifestMode === 'custom'" v-model.number="store.feeData.seaManager.manifestFee" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit">元</span>
               </div>
               <div class="fee-item">
                 <div class="fee-item-label">VGM费</div>
-                <input type="number" class="fee-item-input" id="fpVgmFee" v-model.number="store.feeData.seaManager.vgmFee" step="0.1" min="0" @change="markModified('VGM费')" :disabled="store.feeConfirmed">
+                <input type="number" class="fee-item-input" id="fpVgmFee" v-model.number="store.feeData.seaManager.vgmFee" step="0.1" min="0" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit">元</span>
               </div>
               <div class="fee-item">
@@ -202,7 +184,7 @@ export default {
                   <label class="toggle-switch"><input type="checkbox" v-model="store.feeData.seaManager.ics2Enabled" @change="onIcs2Toggle" :disabled="store.feeConfirmed"><span class="toggle-slider"></span></label>
                   <span class="toggle-label">启用</span>
                 </div>
-                <input type="number" class="fee-item-input small" id="fpIcs2Fee" step="0.1" min="0" v-if="store.feeData.seaManager.ics2Enabled" v-model.number="store.feeData.seaManager.ics2Fee" @change="markModified('ICS2费')" :disabled="store.feeConfirmed">
+                <input type="number" class="fee-item-input small" id="fpIcs2Fee" step="0.1" min="0" v-if="store.feeData.seaManager.ics2Enabled" v-model.number="store.feeData.seaManager.ics2Fee" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit" v-if="store.feeData.seaManager.ics2Enabled">元</span>
               </div>
             </div>
@@ -219,7 +201,7 @@ export default {
             <div class="fee-section-body">
               <div class="fee-item">
                 <div class="fee-item-label">港杂费合计</div>
-                <input type="number" class="fee-item-input" id="fpPortMiscFee" v-model.number="store.feeData.portMisc.fee" step="0.1" min="0" @change="markModified('港杂费')" :disabled="store.feeConfirmed">
+                <input type="number" class="fee-item-input" id="fpPortMiscFee" v-model.number="store.feeData.portMisc.fee" step="0.1" min="0" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit">元</span>
               </div>
             </div>
@@ -295,7 +277,7 @@ export default {
               <div class="ocean-total-row">
                 <span class="ocean-total-label">海运费合计</span>
                 <span class="ocean-total-value-wrap">
-                  <input type="number" class="ocean-total-input" id="fpOceanFee" v-model.number="store.feeData.ocean.fee" step="0.1" min="0" @change="markModified('海运费')" :disabled="store.feeConfirmed">
+                  <input type="number" class="ocean-total-input" id="fpOceanFee" v-model.number="store.feeData.ocean.fee" step="0.1" min="0" :disabled="store.feeConfirmed">
                   <span class="ocean-total-unit">元</span>
                 </span>
               </div>
@@ -312,8 +294,8 @@ export default {
             </div>
             <div class="fee-section-body" id="fpOtherFeeBody">
               <div class="other-fee-row" v-for="(o, idx) in store.feeData.other" :key="idx">
-                <input type="text" class="other-fee-name" placeholder="费用类型" v-model="o.name" @change="markOtherModified()" :disabled="store.feeConfirmed">
-                <input type="number" class="other-fee-amount" placeholder="金额" step="0.1" min="0" v-model.number="o.amount" @change="markOtherModified()" :disabled="store.feeConfirmed">
+                <input type="text" class="other-fee-name" placeholder="费用类型" v-model="o.name" :disabled="store.feeConfirmed">
+                <input type="number" class="other-fee-amount" placeholder="金额" step="0.1" min="0" v-model.number="o.amount" :disabled="store.feeConfirmed">
                 <button class="other-fee-remove" v-if="!store.feeConfirmed" @click="removeOther(idx)">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
@@ -336,10 +318,6 @@ export default {
 
           <!-- 操作按钮：重新优化 + 费用信息确认 -->
           <div class="fee-actions">
-            <button type="button" class="reoptimize-btn" @click="onReOptimize" :disabled="store.submitting">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;vertical-align:middle;margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-              重新优化
-            </button>
             <button type="button" class="confirm-fee-btn" v-if="!store.feeConfirmed" @click="confirmFees">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;vertical-align:middle;margin-right:4px"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
               费用信息确认

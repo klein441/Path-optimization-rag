@@ -1,0 +1,14 @@
+/* ===== All Routes Price Comparison Page ===== */
+.all-routes-page{max-width:1180px;margin:0 auto;padding:1.5rem}
+.ar-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap}
+.ar-header h1{font-family:var(--font-display);font-size:1.2rem;font-weight:700;color:var(--ink);margin:0;display:flex;align-items:center;gap:0.5rem}
+.ar-sub{font-size:0.78rem;color:var(--muted);margin:0.3rem 0 0}
+.ar-back{padding:0.55rem 1rem;font-size:0.82rem;font-weight:600;color:var(--ink);background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--radius-md);cursor:pointer;transition:background .2s ease-out}
+.ar-back:hover{background:var(--rule)}
+.ar-body{background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius-md);overflow-x:auto;padding:0.5rem}
+.ar-empty{padding:3rem 1rem;text-align:center;color:var(--muted);font-size:0.85rem}
+.all-routes-table .badge-cell{width:72px;text-align:center;white-space:nowrap}
+.all-routes-table .badge-cell .best-badge{margin-left:0}
+@media(max-width:968px){
+  .all-routes-page{padding:1rem}
+}

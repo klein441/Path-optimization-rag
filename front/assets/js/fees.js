@@ -156,6 +156,5 @@ export function applyResultToFeeData(data) {
         fd.ocean.source = oceanInfo.is_valid ? 'contract_valid' : 'contract_expired';
     }
     fd._fromRecommendation = true;
-    store.feeModified = {}; // 新结果回填后清除修改标记
     console.log('[FeeData] 已从推荐结果更新:', fd);
 }
