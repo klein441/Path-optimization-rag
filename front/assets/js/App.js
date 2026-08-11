@@ -3,10 +3,9 @@
  */
 import OrderForm from './components/OrderForm.js';
 import ResultsPanel from './components/ResultsPanel.js';
-import CostInfoModal from './components/CostInfoModal.js';
 
 export default {
-    components: { OrderForm, ResultsPanel, CostInfoModal },
+    components: { OrderForm, ResultsPanel },
     template: `
     <header class="app-header">
       <div class="header-inner">
@@ -33,6 +32,5 @@ export default {
       <ResultsPanel />
     </main>
 
-    <CostInfoModal />
     `,
 };

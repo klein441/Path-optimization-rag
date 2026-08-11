@@ -36,7 +36,6 @@ export const store = reactive({
 
     // ===== UI 开关 =====
     advancedOpen: false,
-    modalOpen: false,
     feeConfirmed: false, // 费用信息是否已确认（结果页锁定费用输入）
     feeModified: {}, // 用户手动修改过的费用项（重新优化时仅覆盖这些项）
     productMsOpen: false,

@@ -161,9 +161,6 @@ export default {
         onSubmit() {
             handleSubmit();
         },
-        openCostModal() {
-            store.modalOpen = true;
-        },
         toggleAdvanced() {
             store.advancedOpen = !store.advancedOpen;
         },
@@ -175,10 +172,6 @@ export default {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h6"/><path d="M21 11h-6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h6"/><rect x="9" y="3" width="6" height="18" rx="1"/></svg>
         </div>
         <h2>运输需求录入</h2>
-        <button type="button" class="btn-primary" id="costInfoBtn" style="margin-left:auto;padding:0.55rem 1rem;max-width:190px" @click="openCostModal">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/><line x1="10" y1="4" x2="10" y2="20"/></svg>
-          <span>费用信息确认</span>
-        </button>
       </div>
       <div class="panel-body">
         <form id="logisticsForm" autocomplete="off" @submit.prevent="onSubmit">
