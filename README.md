@@ -38,7 +38,6 @@ Path optimization/
 │   ├── 物料行.xlsx
 │   ├── 提单运单.xlsx
 │   └── TMS费用类型.xlsx
-├── main.py                     # 启动入口
 └── requirements.txt            # 依赖清单
 ```
 
@@ -54,7 +53,7 @@ pip install -r requirements.txt
 ### 2. 启动服务
 
 ```bash
-python main.py
+python back\app.py
 ```
 
 服务启动后访问：
@@ -70,7 +69,7 @@ python main.py
 $env:LLM_API_KEY = "your-api-key-here"
 
 # 然后重新启动
-python main.py
+python back\app.py
 ```
 
 ## API 接口
