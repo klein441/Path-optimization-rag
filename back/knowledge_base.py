@@ -1,6 +1,6 @@
 """
-知识库 — 基于真实数据统计构建的物流知识库
-包含：工厂产能、港口映射、路线统计、费用基准、贸易条款、箱型信息
+知识库 — 基于基础数据 + 配置默认值构建的物流知识库
+包含：工厂产能、港口映射（基于配置）、贸易条款、箱型信息、船公司知识、海运天数（地理估算）
 """
 import numpy as np
 from data_loader import DataLoader
@@ -8,7 +8,7 @@ from config import FACTORY_SHORT, FACTORY_REGION, NORTH_AMERICA, FDA_COUNTRIES, 
 
 
 class KnowledgeBase:
-    """物流知识库（基于真实数据）"""
+    """物流知识库（基于基础数据 + 配置默认值）"""
 
     _instance = None
 
@@ -27,18 +27,15 @@ class KnowledgeBase:
         self._loader = loader
         self._build_factory_info()
         self._build_port_routes()
-        self._build_fee_base()
         self._build_trade_terms()
         self._build_box_types()
         self._build_timeline_stats()
-        self._build_shipping_fee_stats()
-        self._build_carrier_stats()
         self._build_shipping_lines()
         self._built = True
 
     # ===== 工厂信息 =====
     def _build_factory_info(self):
-        """基于各基地产能表构建工厂信息"""
+        """基于各基地产能表 + 物料行构建工厂信息"""
         cap_df = self._loader.factory_capacity
         self.factory_capacity = {}
         for _, row in cap_df.iterrows():
@@ -84,7 +81,6 @@ class KnowledgeBase:
                 workshop = str(row.get('发货车间', ''))
                 material = str(row.get('物料名称', ''))
                 if workshop and workshop != 'nan':
-                    # 从车间名提取工厂（如"安庆丁腈二车间6#线" -> "安庆英科医疗有限公司"）
                     factory = self._match_factory_from_workshop(workshop)
                     if factory:
                         if factory not in factory_products:
@@ -98,7 +94,6 @@ class KnowledgeBase:
 
             for name in self.factory_info:
                 products = list(factory_products.get(name, []))
-                # 产能兜底：如果物料行未匹配到，但产能表显示有该产品产能，则补充
                 if not products:
                     cap = self.factory_capacity.get(name, {})
                     if cap.get("pvc_capacity", 0) > 1000:
@@ -122,95 +117,22 @@ class KnowledgeBase:
                 return factory
         return None
 
-    # ===== 港口与路线 =====
+    # ===== 港口与路线（基于配置默认值，无历史数据） =====
     def _build_port_routes(self):
-        """基于提单运单构建港口与路线统计"""
-        df = self._loader.bl_waybill
+        """构建港口与路线映射（基于工厂配置的默认港口）"""
+        # 工厂 -> 始发港映射（基于配置的默认港口）
+        self.factory_ports = {}
+        for factory, info in self.factory_info.items():
+            default_port = info.get("default_port", "青岛/QINGDAO")
+            if default_port:
+                self.factory_ports[factory] = [{"port": default_port, "count": 0}]
 
-        # 检查必要列是否存在
-        has_country = '运抵国' in df.columns
-        has_origin = '始发港' in df.columns
-        has_dest = '目的港' in df.columns
-        has_term = '贸易条款' in df.columns
-        has_factory = '发货工厂' in df.columns
-
-        # 运抵国 -> 目的港映射
+        # 运抵国 -> 目的港映射（空，由 app.py 的 /api/dest-ports 接口实时查询 运抵国与目的港.xlsx）
         self.country_dest_ports = {}
         self.country_origin_ports = {}
         self.country_trade_terms = {}
         self.all_countries = []
-
-        if has_country:
-            countries = df['运抵国'].dropna().unique()
-            self.all_countries = sorted(countries.tolist())
-            for country in countries:
-                if has_dest:
-                    self.country_dest_ports[country] = self._loader.get_country_dest_ports(country)
-                if has_origin:
-                    self.country_origin_ports[country] = self._loader.get_country_origin_ports(country)
-                if has_term:
-                    self.country_trade_terms[country] = self._loader.get_country_trade_terms(country)
-
-        # 工厂 -> 始发港映射
-        self.factory_ports = {}
-        if has_factory and has_origin:
-            for factory in self.factory_info:
-                routes = self._loader.get_factory_routes(factory)
-                if not routes.empty and '始发港' in routes.columns:
-                    ports = routes['始发港'].dropna().value_counts()
-                    self.factory_ports[factory] = [{"port": idx, "count": int(cnt)} for idx, cnt in ports.items()]
-
-        # 所有始发港列表
         self.all_origin_ports = []
-        if has_origin:
-            self.all_origin_ports = sorted(df['始发港'].dropna().unique().tolist())
-
-    # ===== 费用基准 =====
-    def _build_fee_base(self):
-        """基于费用明细和出口销售订单构建费用基准"""
-        # 1. 从出口销售订单中解析各运抵国的费用统计
-        self.country_fee_stats = {}
-        for country in self.all_countries:
-            stats = self._loader.get_fee_stats_by_country(country)
-            if stats:
-                self.country_fee_stats[country] = stats
-
-        # 2. 从费用明细表构建全局费用统计
-        costs_df = self._loader.costs
-        self.global_fee_stats = {}
-        if '费用大类' in costs_df.columns and '含税金额' in costs_df.columns:
-            for fee_class, group in costs_df.groupby('费用大类'):
-                amounts = group['含税金额'].dropna()
-                amounts = amounts[amounts > 0]
-                if len(amounts) > 0:
-                    median_val = float(np.median(amounts))
-                    mean_val = float(np.mean(amounts))
-                    # 使用中位数（比均值更抗异常值）
-                    self.global_fee_stats[fee_class] = {
-                        "count": len(amounts),
-                        "mean": round(mean_val, 2),
-                        "median": round(median_val, 2),
-                        "min": round(float(np.min(amounts)), 2),
-                        "max": round(float(np.max(amounts)), 2),
-                    }
-
-        # 3. TMS费用类型定义
-        self.tms_fee_types = {}
-        tms_df = self._loader.tms_fee_type
-        if '费用大类' in tms_df.columns and '费用类型' in tms_df.columns:
-            for _, row in tms_df.iterrows():
-                cat = row['费用大类']
-                ftype = row['费用类型']
-                if cat not in self.tms_fee_types:
-                    self.tms_fee_types[cat] = []
-                self.tms_fee_types[cat].append(ftype)
-
-        # 4. 各运抵国平均总费用
-        self.country_avg_cost = {}
-        for country in self.all_countries:
-            cost_info = self._loader.get_country_avg_cost(country)
-            if cost_info:
-                self.country_avg_cost[country] = cost_info
 
     # ===== 贸易条款 =====
     def _build_trade_terms(self):
@@ -264,15 +186,13 @@ class KnowledgeBase:
     def _build_box_types(self):
         """集装箱箱型信息"""
         self.box_types = BOX_TYPE_VOLUME
-        self.box_type_stats = self._loader.get_box_type_stats()
-        self.container_transport_modes = self._loader.get_container_transport_mode_stats()
+        self.box_type_stats = {}
+        self.container_transport_modes = {}
 
-    # ===== 时间统计 =====
+    # ===== 时间统计（地理估算） =====
     def _build_timeline_stats(self):
-        """基于历史数据构建运输时间统计"""
-        df = self._loader.bl_waybill
-
-        # 地理估算海运天数（历史数据ETD->ETA不可靠时的回退值）
+        """基于地理估算构建运输时间统计"""
+        # 地理估算海运天数
         geo_ocean_days = {
             "日本": 7, "韩国": 6, "新加坡": 12, "泰国": 10, "越南": 5, "马来西亚": 10, "菲律宾": 10,
             "美国": 18, "加拿大": 17, "墨西哥": 20,
@@ -287,53 +207,21 @@ class KnowledgeBase:
             "土耳其": 28, "以色列": 26, "黎巴嫩": 27,
         }
 
-        # 各运抵国海运天数
+        # 各运抵国海运天数（全用地理估算）
         self.country_ocean_days = {}
         for country in self.all_countries:
-            days_info = self._loader.get_country_ocean_days(country)
-            if days_info and days_info.get("median", 0) >= 5:
-                # 历史数据可靠（中位数>=5天）
-                self.country_ocean_days[country] = days_info
-            else:
-                # 历史数据不可靠，使用地理估算
-                geo_days = geo_ocean_days.get(country, 30)
-                self.country_ocean_days[country] = {
-                    "mean": float(geo_days),
-                    "median": float(geo_days),
-                    "min": geo_days - 3,
-                    "max": geo_days + 5,
-                    "count": 0,
-                    "source": "geographic_estimate",
-                }
-
-        # 货好到离港的平均天数
-        if '_cr_to_etd_days' in df.columns:
-            valid = df['_cr_to_etd_days'].dropna()
-            valid = valid[(valid >= 0) & (valid <= 60)]
-            self.avg_cr_to_etd_days = {
-                "mean": round(float(valid.mean()), 1) if len(valid) else 10.0,
-                "median": float(valid.median()) if len(valid) else 10.0,
+            geo_days = geo_ocean_days.get(country, 30)
+            self.country_ocean_days[country] = {
+                "mean": float(geo_days),
+                "median": float(geo_days),
+                "min": geo_days - 3,
+                "max": geo_days + 5,
+                "count": 0,
+                "source": "geographic_estimate",
             }
-        else:
-            self.avg_cr_to_etd_days = {"mean": 10.0, "median": 10.0}
 
-    # ===== 海运费统计 =====
-    def _build_shipping_fee_stats(self):
-        """基于海运费收入表构建海运费统计"""
-        sf_df = self._loader.shipping_fee
-        self.shipping_fee_stats = {}
-        for col in ['海运费', '客户海运费', '海运费收入']:
-            if col in sf_df.columns:
-                vals = sf_df[col].dropna()
-                vals = vals[vals > 0]
-                if len(vals):
-                    self.shipping_fee_stats[col] = {
-                        "mean": round(float(vals.mean()), 2),
-                        "median": round(float(vals.median()), 2),
-                        "min": round(float(vals.min()), 2),
-                        "max": round(float(vals.max()), 2),
-                        "count": len(vals),
-                    }
+        # 货好到离港平均天数（默认值）
+        self.avg_cr_to_etd_days = {"mean": 10.0, "median": 10.0}
 
     # ===== 查询接口 =====
     def get_factory_by_product(self, product_type):
@@ -341,8 +229,7 @@ class KnowledgeBase:
         result = []
         for name, info in self.factory_info.items():
             products = info.get("products", [])
-            
-            # 如果没有从物料行匹配到产品，使用产能数据回退
+
             if not products:
                 pvc_cap = info.get("pvc_capacity", 0)
                 nitrile_cap = info.get("nitrile_capacity", 0)
@@ -350,16 +237,15 @@ class KnowledgeBase:
                     products.append("PVC手套")
                 if nitrile_cap > 1000:
                     products.append("丁腈手套")
-                # 海外工厂默认支持多种产品
                 if info.get("region") == "海外":
                     if "PE产品" not in products:
                         products.append("PE产品")
                     if "小日化产品" not in products:
                         products.append("小日化产品")
-            
+
             if not products:
                 continue
-                
+
             matched = False
             for p in products:
                 if product_type in p or p in product_type:
@@ -367,8 +253,7 @@ class KnowledgeBase:
                     break
             if matched:
                 result.append({"name": name, "info": info})
-                
-        # 按产能占比排序
+
         result.sort(key=lambda x: self._get_product_share(x["info"], product_type), reverse=True)
         return result
 
@@ -382,46 +267,49 @@ class KnowledgeBase:
             return info.get("total_capacity", 0)
 
     def get_best_dest_port(self, country):
-        """获取最优目的港（使用频率最高）"""
+        """获取最优目的港（无历史数据，返回 None 由前端查询）"""
         ports = self.country_dest_ports.get(country, [])
         if ports:
             return ports[0]["port"]
         return None
 
     def get_best_origin_port(self, country, factory_name=None):
-        """获取最优始发港"""
-        # 优先使用工厂默认港口
+        """获取最优始发港（基于工厂配置的默认港口）"""
         if factory_name and factory_name in self.factory_ports:
             ports = self.factory_ports[factory_name]
             if ports:
                 return ports[0]["port"]
-        # 其次使用该运抵国最常用始发港
-        ports = self.country_origin_ports.get(country, [])
-        if ports:
-            return ports[0]["port"]
-        # 最后使用工厂默认港口
         if factory_name and factory_name in self.factory_info:
             return self.factory_info[factory_name]["default_port"]
         return "青岛/QINGDAO"
 
     def get_best_trade_term(self, country):
-        """获取最优贸易条款（历史最常用）"""
+        """获取最优贸易条款（默认 FOB）"""
         terms = self.country_trade_terms.get(country, [])
         if terms:
             return terms[0]["term"]
         return "FOB"
 
     def get_ocean_days(self, country):
-        """获取海运天数"""
+        """获取海运天数（优先使用船公司航程数据，回退到地理估算）"""
+        # 1. 如果该国有明确的区域映射，从船公司数据获取中位数航程
+        if country in self.country_to_region:
+            region = self.country_to_region[country]
+            lines = self.shipping_lines.get(region, [])
+            if lines:
+                transit_days_list = [l["transit_days"] for l in lines]
+                if transit_days_list:
+                    median_days = sorted(transit_days_list)[len(transit_days_list) // 2]
+                    return float(median_days)
+        # 2. 回退到地理估算（更保守但覆盖更全）
         info = self.country_ocean_days.get(country)
         if info:
             return info.get("median", 30)
-        # 回退到估算值
         return 30
 
     def get_fee_breakdown(self, country):
-        """获取指定运抵国的费用明细"""
-        return self.country_fee_stats.get(country, {})
+        """获取指定运抵国的费用明细（无历史数据）"""
+        return {}
 
     def get_summary(self):
         """获取知识库摘要（用于LLM上下文）"""
@@ -429,87 +317,23 @@ class KnowledgeBase:
             "total_factories": len(self.factory_info),
             "total_countries": len(self.all_countries),
             "total_origin_ports": len(self.all_origin_ports),
-            "total_fee_categories": len(self.tms_fee_types),
-            "avg_shipping_fee": self.shipping_fee_stats.get("海运费", {}).get("median", 2500),
+            "total_fee_categories": 0,
+            "avg_shipping_fee": 2500,
             "avg_cr_to_etd_days": self.avg_cr_to_etd_days.get("median", 10),
             "top_countries": self.all_countries[:10],
-            "top_routes": [
-                f"{self.country_origin_ports.get(c, [{}])[0].get('port', '?')} → {c}"
-                for c in self.all_countries[:5]
-            ],
+            "top_routes": [],
         }
 
-    # ===== 承运商（车队）统计 =====
-    def _build_carrier_stats(self):
-        """基于集装箱运单构建各工厂的承运商统计"""
-        self.factory_carriers = {}
-        for factory_name in self.factory_info:
-            carriers = self._loader.get_carrier_stats_by_factory(factory_name)
-            if carriers:
-                self.factory_carriers[factory_name] = carriers
-
-        # 统计自有 vs 外包比例
-        self.carrier_type_stats = {}
-        all_carriers = []
-        for carriers in self.factory_carriers.values():
-            all_carriers.extend(carriers)
-
-        type_counts = {"自有": 0, "外包": 0, "客户自提": 0}
-        for c in all_carriers:
-            t = c.get("type", "外包")
-            type_counts[t] = type_counts.get(t, 0) + c["count"]
-
-        total = sum(type_counts.values())
-        if total > 0:
-            for t, cnt in type_counts.items():
-                self.carrier_type_stats[t] = {
-                    "count": cnt,
-                    "ratio": round(cnt / total * 100, 1),
-                }
-
-    def get_best_carrier(self, factory_name):
-        """获取指定工厂最常用的承运商（车队）"""
-        carriers = self.factory_carriers.get(factory_name, [])
-        if carriers:
-            return carriers[0]
-        return None
-
+    # ===== 承运商（车队）推荐（无历史数据） =====
     def get_carrier_recommendation(self, factory_name, box_count=0):
-        """
-        获取承运商推荐方案
-        返回: {'recommended': 首选承运商, 'type': 自有/外包, 'alternatives': [...], 'self_owned_ratio': 自有比例}
-        """
-        carriers = self.factory_carriers.get(factory_name, [])
-
-        if not carriers:
-            # 无历史数据时的通用推荐
-            return {
-                "recommended": "建议从工厂附近物流公司选择",
-                "type": "外包",
-                "mode": "直拖",
-                "alternatives": [],
-                "self_owned_ratio": 0,
-                "reason": "该工厂暂无历史承运商数据，建议选择港口本地物流公司",
-            }
-
-        # 首选：使用频率最高的承运商
-        primary = carriers[0]
-
-        # 统计该工厂自有 vs 外包比例
-        self_cnt = sum(c["count"] for c in carriers if c["type"] == "自有")
-        total_cnt = sum(c["count"] for c in carriers)
-        self_ratio = round(self_cnt / total_cnt * 100, 1) if total_cnt > 0 else 0
-
-        # 备选：前3个不同承运商
-        alts = carriers[1:4]
-
+        """获取承运商推荐方案（无历史数据，返回通用推荐）"""
         return {
-            "recommended": primary["carrier"],
-            "type": primary["type"],
-            "mode": primary["mode"],
-            "count": primary["count"],
-            "alternatives": [{"carrier": a["carrier"], "type": a["type"], "count": a["count"]} for a in alts],
-            "self_owned_ratio": self_ratio,
+            "recommended": "建议从工厂附近物流公司选择",
+            "type": "外包",
+            "mode": "直拖",
+            "alternatives": [],
+            "self_owned_ratio": 0,
+            "reason": "该工厂暂无历史承运商数据，建议选择港口本地物流公司",
         }
 
     # ===== 船公司知识库 =====
@@ -587,9 +411,11 @@ class KnowledgeBase:
             "挪威": "欧洲", "瑞士": "欧洲",
             "日本": "东南亚", "韩国": "东南亚", "新加坡": "东南亚", "泰国": "东南亚",
             "越南": "东南亚", "马来西亚": "东南亚", "菲律宾": "东南亚",
-            "印度尼西亚": "东南亚", "文莱": "东南亚",
+            "印度尼西亚": "东南亚", "文莱": "东南亚", "缅甸": "东南亚",
             "阿联酋": "中东", "沙特阿拉伯": "中东", "阿曼": "中东", "巴林": "中东",
             "科威特": "中东", "约旦": "中东",
+            "土耳其": "中东", "以色列": "中东", "黎巴嫩": "中东",
+            "印度": "中东", "巴基斯坦": "中东", "孟加拉": "中东",
             "澳大利亚": "澳洲", "新西兰": "澳洲",
             "巴西": "南美", "阿根廷": "南美", "智利": "南美", "秘鲁": "南美", "哥伦比亚": "南美",
             "南非": "非洲", "埃及": "非洲", "肯尼亚": "非洲", "尼日利亚": "非洲", "摩洛哥": "非洲",
@@ -600,11 +426,9 @@ class KnowledgeBase:
         region = self.country_to_region.get(country, "欧洲")
         lines = self.shipping_lines.get(region, self.shipping_lines.get("欧洲", []))
 
-        # 根据目的港进一步细化
         dest_ports = self.country_dest_ports.get(country, [])
         dest_port_name = dest_ports[0]["port"] if dest_ports else ""
 
-        # 按时效排序
         sorted_lines = sorted(lines, key=lambda x: x["transit_days"])
         return {
             "region": region,
@@ -620,19 +444,7 @@ class KnowledgeBase:
         return None
 
     def get_cheapest_shipping_line(self, country, max_transit_days=None):
-        """
-        获取最便宜的船公司（在满足时效要求的船公司中选最优价格）
-
-        策略：
-        1. 如果提供 max_transit_days，只保留 transit_days <= max_transit_days 的船公司
-        2. 在符合条件的船公司中，优先选 advantage 字段含"价格"关键字的
-        3. 如果多个含价格优势，选 transit_days 最短的（时效越短通常越便宜）
-        4. 如果都不含价格优势，选 transit_days 最短的（时效=成本代理指标）
-
-        :param country: 运抵国
-        :param max_transit_days: 最大可接受转运天数（None=不限）
-        :return: dict with 'recommended', 'available', 'region', 'filtered_count', 'total_count'
-        """
+        """获取最便宜的船公司（在满足时效要求的船公司中选最优价格）"""
         info = self.get_shipping_lines(country)
         all_lines = info["lines"] if info else []
         region = info["region"] if info else "未知"
@@ -648,10 +460,8 @@ class KnowledgeBase:
 
         total_count = len(all_lines)
 
-        # 1. 按时效过滤
         if max_transit_days is not None:
             feasible = [l for l in all_lines if l["transit_days"] <= max_transit_days]
-            # 如果全部超时，放宽到所有船公司中选最快的（紧急情况）
             if not feasible:
                 feasible = [min(all_lines, key=lambda x: x["transit_days"])]
         else:
@@ -659,16 +469,12 @@ class KnowledgeBase:
 
         filtered_count = len(feasible)
 
-        # 2. 在符合条件的船公司中，按价格优先级排序
         def price_score(line):
             adv = line.get("advantage", "")
-            # 含"价格"关键字 → 高优先级
             if "价格" in adv:
                 return (0, line["transit_days"])
-            # 含"优势"、"优" → 中优先级
             if "优势" in adv or "优" in adv:
                 return (1, line["transit_days"])
-            # 其他 → 默认优先级，按 transit_days
             return (2, line["transit_days"])
 
         sorted_by_price = sorted(feasible, key=price_score)

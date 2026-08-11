@@ -82,6 +82,10 @@ function setupMultiSelects() {
         dropdown.querySelectorAll('input[type="checkbox"]').forEach(cb => {
             cb.addEventListener('change', () => {
                 updateMultiSelectDisplay(ms);
+                // 产品类型变化时更新尺码选择器
+                if (ms.id === 'productTypeMulti') {
+                    renderProductSizes();
+                }
             });
         });
     });
@@ -135,6 +139,10 @@ function updateMultiSelectDisplay(ms) {
             if (cb) {
                 cb.checked = false;
                 updateMultiSelectDisplay(ms);
+                // 箱型取消时同步刷新下方数量行
+                if (ms.id === 'boxTypeMulti') {
+                    updateBoxTypeQuantities();
+                }
             }
         });
     });
@@ -150,12 +158,61 @@ function getMultiSelectValues(msId) {
     return values;
 }
 
+// SIZES = ['S', 'M', 'L', 'XL'];
+
+function renderProductSizes() {
+    const products = getMultiSelectValues('productTypeMulti');
+    const container = document.getElementById('productSizeContainer');
+    if (!container) return;
+
+    if (products.length === 0) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    // 保留已有尺码选择
+    const newSizes = {};
+    products.forEach(function(p) {
+        newSizes[p] = productSizes[p] || 'M';
+    });
+    productSizes = newSizes;
+
+    var html = '';
+    products.forEach(function(p) {
+        html += '<div class="product-size-row">' +
+            '<span class="product-size-label">' + p + '</span>' +
+            '<select class="product-size-select" data-product="' + p.replace(/"/g, '&quot;') + '">' +
+            '<option value="S"' + (productSizes[p] === 'S' ? ' selected' : '') + '>S</option>' +
+            '<option value="M"' + (productSizes[p] === 'M' ? ' selected' : '') + '>M</option>' +
+            '<option value="L"' + (productSizes[p] === 'L' ? ' selected' : '') + '>L</option>' +
+            '<option value="XL"' + (productSizes[p] === 'XL' ? ' selected' : '') + '>XL</option>' +
+            '</select>' +
+            '</div>';
+    });
+
+    container.innerHTML = html;
+    container.style.display = '';
+
+    // 绑定尺码变化事件
+    container.querySelectorAll('.product-size-select').forEach(function(sel) {
+        sel.addEventListener('change', function() {
+            var product = this.dataset.product;
+            productSizes[product] = this.value;
+        });
+    });
+}
+
 // ===== 集装箱箱型固定体积（m³）=====
 const BOX_VOLUMES = {
-    "20GP": 33.1, "40GP": 67.5, "40HQ": 76.0, "45HQ": 85.0,
-    "20RF": 33.1, "40RF": 67.5, "20OT": 33.1, "40OT": 67.5,
-    "20FR": 33.1, "40FR": 67.5,
+    "20GP": 33.1, "20HQ": 33.1,
+    "40GP": 67.5, "40HQ": 76.0, "40HC": 76.0,
+    "40NOR": 67.5,
+    "45HQ": 85.0,
 };
+
+// 跟踪产品尺码选择
+let productSizes = {};  // { "丁腈手套": "M", "PVC手套": "L" }
 
 // 跟踪各箱型数量
 let boxTypeCounts = {};  // { "40HQ": 5, "20GP": 3 }
@@ -317,7 +374,18 @@ function setupCostInfoModal() {
     document.querySelectorAll('.fee-section-header').forEach(header => {
         header.addEventListener('click', () => {
             const section = header.closest('.fee-section');
+            const wasOpen = section.classList.contains('open');
             section.classList.toggle('open');
+            // 展开海运费时，如果表单有基础数据且报价未加载，自动触发获取
+            if (!wasOpen && section.dataset.feeGroup === 'ocean') {
+                var destCountry = (document.getElementById('destCountry')?.value || '').trim();
+                if (destCountry) {
+                    var realtimeEl = section.querySelector('.ocean-realtime');
+                    if (realtimeEl && realtimeEl.style.display === 'none') {
+                        fetchOceanFreightRate();
+                    }
+                }
+            }
         });
     });
 
@@ -743,6 +811,8 @@ function updateGrandTotal() {
     if (pmfs) pmfs.textContent = '¥' + formatFee(feeData.portMisc.fee);
     var ofs = document.getElementById('oceanFeeSummary');
     if (ofs) ofs.textContent = '¥' + formatFee(feeData.ocean.fee);
+    var ofsFp = document.getElementById('fpOceanFeeSummary');
+    if (ofsFp) ofsFp.textContent = '¥' + formatFee(feeData.ocean.fee);
     var otfs = document.getElementById('otherFeeSummary');
     if (otfs) otfs.textContent = '¥' + formatFee(getOtherTotal());
 
@@ -757,6 +827,9 @@ function updateGrandTotal() {
             if (sub) sub.textContent = '约 $' + Math.round(grandTotal / 7.2).toLocaleString() + ' USD';
         }
     }
+
+    // 如果结果面板存在，同步更新结果面板中的费用显示
+    updateFeePanelTotals();
 }
 
 function addOtherFeeRow() {
@@ -812,16 +885,29 @@ function setupAdvancedToggle() {
     }
 }
 
-// ===== 加载动态数据（工厂、国家列表等）=====
+// ===== 加载动态数据（国家列表从运抵国与目的港.xlsx）=====
 async function loadCountries() {
+    var destCountryEl = document.getElementById('destCountry');
+    if (!destCountryEl) return;
+
     try {
-        const resp = await fetch(`${API_BASE}/api/logistics/countries`);
-        const data = await resp.json();
-        if (data.success && data.countries.length > 0) {
-            console.log('[API] 加载了', data.count, '个运抵国');
+        var resp = await fetch(API_BASE + '/api/countries-source');
+        var data = await resp.json();
+        if (data.success && data.data.countries.length > 0) {
+            var countries = data.data.countries;
+            var options = '<option value="">请选择运抵国</option>';
+            countries.forEach(function(c) {
+                options += '<option value="' + c.name.replace(/"/g, '&quot;') + '">' + c.name + '</option>';
+            });
+            destCountryEl.innerHTML = options;
+            console.log('[API] 从运抵国与目的港.xlsx加载了 ' + countries.length + ' 个运抵国');
+        } else {
+            console.warn('[API] 运抵国列表为空，使用回退选项');
+            destCountryEl.innerHTML = '<option value="">未加载到数据</option>';
         }
     } catch (e) {
-        console.log('[API] 使用静态国家列表');
+        console.error('[API] 加载运抵国失败:', e.message);
+        destCountryEl.innerHTML = '<option value="">加载失败，请刷新</option>';
     }
 }
 
@@ -831,6 +917,55 @@ function setupFormSubmit() {
         e.preventDefault();
         await handleSubmit();
     });
+
+    // 运抵国变化时自动加载终到港列表
+    var destCountryEl = document.getElementById('destCountry');
+    if (destCountryEl) {
+        destCountryEl.addEventListener('change', function() {
+            loadDestPorts(this.value);
+        });
+        // 页面加载时也触发一次（如果有默认选中值）
+        if (destCountryEl.value) {
+            loadDestPorts(destCountryEl.value);
+        }
+    }
+}
+
+// ===== 加载运抵国对应的终到港列表 =====
+async function loadDestPorts(country) {
+    var destPortEl = document.getElementById('destPort');
+    if (!destPortEl) return;
+
+    if (!country) {
+        destPortEl.innerHTML = '<option value="">请先选择运抵国</option>';
+        return;
+    }
+
+    // 显示加载中
+    destPortEl.innerHTML = '<option value="">加载中...</option>';
+
+    try {
+        var resp = await fetch(API_BASE + '/api/dest-ports?country=' + encodeURIComponent(country));
+        var result = await resp.json();
+        if (result.success && result.data.ports.length > 0) {
+            var options = '<option value="">请选择终到港</option>';
+            result.data.ports.forEach(function(p) {
+                var name = p.port;
+                // 清理港口名（去掉LOCODE前缀和州后缀）
+                var display = name;
+                var m = name.match(/^[A-Z]{2}[A-Z0-9]{3}\s*\/\s*(.+)/);
+                if (m) display = m[1];
+                display = display.replace(/,\s*[A-Z]{2}$/, '').trim();
+                options += '<option value="' + name.replace(/"/g, '&quot;') + '">' + display + '</option>';
+            });
+            destPortEl.innerHTML = options;
+        } else {
+            destPortEl.innerHTML = '<option value="">未找到目的港，请手动输入</option>';
+        }
+    } catch (e) {
+        console.warn('[API] 加载目的港失败:', e.message);
+        destPortEl.innerHTML = '<option value="">加载失败，请手动输入</option>';
+    }
 }
 
 async function handleSubmit() {
@@ -847,9 +982,12 @@ async function handleSubmit() {
         orderNumber: document.getElementById('orderNumber')?.value || '',
         productType: productTypes.join(','),
         productTypes: productTypes,
+        productSizes: productSizes,  // { "丁腈手套": "M", "PVC手套": "L" }
         boxTypes: boxTypes,
         boxTypeCounts: boxTypeCounts,  // 各箱型数量，如 {"40HQ": 5, "20GP": 3}
         destCountry: document.getElementById('destCountry').value,
+        destPort: document.getElementById('destPort')?.value || '',
+        gloveQty: parseInt(document.getElementById('gloveQty')?.value) || 0,  // 千支
         boxCount: totalBoxes,
         weight: totalWeight,
         volume: parseFloat(document.getElementById('volume').value) || 0,
@@ -897,6 +1035,7 @@ async function handleSubmit() {
             renderResult(result.data);
             renderFeePanel(result.data);
             renderAlternativesAfterResults(result.data.alternatives || []);
+            renderAllRoutes(result.data.allCandidates || [], result.data.primary);
         } else {
             throw new Error(result.error || '推荐生成失败');
         }
@@ -1109,7 +1248,7 @@ function renderRecCards(p) {
                     运输周期
                 </div>
                 <div class="rec-card-value">${p.totalDays || '?'} 天</div>
-                <div class="rec-card-sub">内陆 ${p.inlandDays || '?'}天 + 海运 ${p.oceanDays || '?'}天</div>
+                <div class="rec-card-sub">内陆 ${p.inlandDays || '?'}天${p.waitingDays > 0 ? ' + 等船 ' + p.waitingDays + '天' : ''} + 海运 ${p.oceanDays || '?'}天</div>
             </div>
             <div class="rec-card">
                 <div class="rec-card-label">
@@ -1287,6 +1426,8 @@ function renderTimeline(p) {
     const etd = timeline.etd || p.etd || '—';
     const eta = timeline.eta || p.eta || '—';
 
+    const waitingDays = timeline.waiting_days || p.waitingDays || 0;
+
     const steps = [
         {
             title: '货好时间',
@@ -1296,15 +1437,28 @@ function renderTimeline(p) {
             icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/></svg>',
         },
         {
-            title: '工厂发货',
-            date: `预计 ${timeline.inland_days || '?'} 天后`,
-            desc: '内陆运输至港口',
+            title: '内陆运输',
+            date: `${timeline.inland_days || '?'} 天`,
+            desc: '工厂 → 始发港（拖车/铁路）',
             icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
         },
+    ];
+
+    // 如果有等船期，插入一个 waiting step
+    if (waitingDays > 0) {
+        steps.push({
+            title: '等船期',
+            date: `${waitingDays} 天`,
+            desc: '货物已到港，等待预定船期',
+            icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+        });
+    }
+
+    steps.push(
         {
             title: '预计离港 (ETD)',
             date: etd,
-            desc: `${timeline.ship_schedule || p.shipSchedule || '—'} 船期`,
+            desc: `${timeline.ship_schedule || p.shipSchedule || '—'} 船期离港`,
             icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18s1.5-2 4.5-2 4.5 2 9 2 4.5-2 4.5-2"/><path d="M21 12l-9-7-9 7"/><path d="M12 2l0 18"/></svg>',
         },
         {
@@ -1316,10 +1470,10 @@ function renderTimeline(p) {
         {
             title: '预计到港 (ETA)',
             date: eta,
-            desc: `总周期 ${timeline.total_days || p.totalDays || '?'} 天`,
+            desc: `总周期 ${timeline.total_days || p.totalDays || '?'} 天（内陆${timeline.inland_days||'?'}天${waitingDays > 0 ? ' + 等船' + waitingDays + '天' : ''} + 海运${timeline.ocean_days||'?'}天）`,
             icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
-        },
-    ];
+        }
+    );
 
     let itemsHtml = '';
     steps.forEach((step, idx) => {
@@ -1432,11 +1586,18 @@ function renderAlternatives(alts) {
 
 // ===== 海运费实时获取（支持多箱型）=====
 async function fetchOceanFreightRate() {
-    const loadingEl = document.getElementById('oceanLoading');
-    const realtimeEl = document.getElementById('oceanRealtime');
-    const errorEl = document.getElementById('oceanError');
-    const errorDesc = document.getElementById('oceanErrorDesc');
-    const refreshBtn = document.getElementById('oceanRefreshBtn');
+    // 辅助函数：优先查找带fp前缀的结果面板元素，回退到原始HTML元素
+    function getEl(id) {
+        var el = document.getElementById('fp' + id);
+        if (!el) el = document.getElementById(id);
+        return el;
+    }
+
+    const loadingEl = getEl('oceanLoading');
+    const realtimeEl = getEl('oceanRealtime');
+    const errorEl = getEl('oceanError');
+    const errorDesc = getEl('oceanErrorDesc');
+    const refreshBtn = getEl('oceanRefreshBtn');
 
     // 显示加载状态
     loadingEl.style.display = 'flex';
@@ -1477,8 +1638,17 @@ async function fetchOceanFreightRate() {
                 '| 推荐航司:', routeInfo.recommendedShippingLine?.name || '无');
 
             // 自动推荐陆运费（根据工厂省份+路线报价卡）
-            initLandFees(routeInfo.factoryProvince, 'direct',
-                         routeInfo.factory || '', routeInfo.originPort || '');
+            // 如果feeData已从后端推荐结果更新，跳过覆盖
+            if (!feeData._fromRecommendation) {
+                initLandFees(routeInfo.factoryProvince, 'direct',
+                             routeInfo.factory || '', routeInfo.originPort || '');
+            }
+
+            // 自动推荐港杂费（根据始发港+贸易条款+箱型查询标准表）
+            if (!feeData._fromRecommendation) {
+                var tradeTermForMisc = document.getElementById('tradePref')?.value || '';
+                fetchPortMiscFee(origin, tradeTermForMisc, boxTypes);
+            }
 
             // 更新推荐航线信息卡片
             updateRouteInfoCard(routeInfo.factoryShort || routeInfo.factory || '',
@@ -1491,6 +1661,11 @@ async function fetchOceanFreightRate() {
             destination = fallback.destination;
             const factoryInfo = getFallbackFactory(origin, productType);
             updateRouteInfoCard(factoryInfo.factoryShort, origin, destination);
+            // 回退路径也尝试获取港杂费推荐
+            if (!feeData._fromRecommendation) {
+                var tradeTermForMisc2 = document.getElementById('tradePref')?.value || '';
+                fetchPortMiscFee(origin, tradeTermForMisc2, boxTypes);
+            }
         }
     } catch (e) {
         console.warn('[海运费] 路线查询异常，回退到默认映射:', e.message);
@@ -1499,6 +1674,11 @@ async function fetchOceanFreightRate() {
         destination = fallback.destination;
         const factoryInfo = getFallbackFactory(origin, productType);
         updateRouteInfoCard(factoryInfo.factoryShort, origin, destination);
+        // 异常回退路径也尝试获取港杂费推荐
+        if (!feeData._fromRecommendation) {
+            var tradeTermForMisc3 = document.getElementById('tradePref')?.value || '';
+            fetchPortMiscFee(origin, tradeTermForMisc3, boxTypes);
+        }
     }
 
     // Step 2: 调用船公司比价接口
@@ -1524,7 +1704,8 @@ async function fetchOceanFreightRate() {
             const realCheapest = carriers.length > 0 ? carriers[0] : null;
 
             // 更新价格摘要：中间卡片显示USD总价，顶部海运费合计和输入框是CNY
-            document.getElementById('oceanMedianRate').textContent =
+            var medianRateEl = getEl('oceanMedianRate');
+            if (medianRateEl) medianRateEl.textContent =
                 realCheapest ? '$' + Number(realCheapest.totalUsd).toLocaleString() : '—';
 
             // 航线信息
@@ -1533,7 +1714,8 @@ async function fetchOceanFreightRate() {
                 boxTypeSummaryParts.push(bt + '×' + (boxTypeCounts[bt] || 1));
             });
             var boxTypeSummary = boxTypeSummaryParts.join(' + ');
-            document.getElementById('oceanRouteInfo').textContent =
+            var routeInfoEl = getEl('oceanRouteInfo');
+            if (routeInfoEl) routeInfoEl.textContent =
                 origin + ' → ' + destination + ' · ' + boxTypeSummary;
 
             // 转运天数 / 船公司数量
@@ -1542,85 +1724,135 @@ async function fetchOceanFreightRate() {
                 transitParts.push(routeInfo.transitDays + '天转运');
             }
             transitParts.push(carriers.length + '家船公司');
-            document.getElementById('oceanTransitInfo').textContent = transitParts.join(' · ');
+            var transitEl = getEl('oceanTransitInfo');
+            if (transitEl) transitEl.textContent = transitParts.join(' · ');
 
             // 获取时间
             var fetchTime = d.fetchedAt
                 ? new Date(d.fetchedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                 : '刚刚';
-            document.getElementById('oceanFetchedAt').textContent = '📄 合约表 · ' + fetchTime;
+            var fetchedAtEl = getEl('oceanFetchedAt');
+            if (fetchedAtEl) fetchedAtEl.textContent = '📄 合约表 · ' + fetchTime;
 
-            // 渲染各船公司报价卡片（可点击选择）— 全USD展示
-            var quotesListEl = document.getElementById('oceanQuotesList');
-            var quotesGridEl = document.getElementById('oceanQuotesGrid');
+            // 渲染各船公司报价卡片（网格样式，可点击选择）
+            var quotesListEl = getEl('oceanQuotesList');
+            var quotesGridEl = getEl('oceanQuotesGrid');
 
-            var cardsHtml = carriers.map(function(c, idx) {
+            // 构建卡片网格
+            var boxTypeKeys = Object.keys(boxTypesQty);
+            var cardsHtml = '<div class="ocean-quotes-grid">';
+
+            cardsHtml += carriers.map(function(c, idx) {
                 var isCheapest = idx === 0;
-                var cardClass = 'ocean-quote-card' + (c.isValid ? ' valid' : '') + (isCheapest ? ' cheapest' : '');
-                var prefix = isCheapest ? '⭐ ' : '';
+                var cardClass = 'ocean-quote-card' + (isCheapest ? ' cheapest' : '') + (!c.isValid ? ' expired' : '');
+                var star = isCheapest ? '<span class="star-icon">⭐</span>' : '';
                 var validBadge = c.isValid
-                    ? '<span class="ocean-quote-valid yes">有效</span>'
-                    : '<span class="ocean-quote-valid no">过期</span>';
-                var perTypeHtml = '';
-                if (c.perTypeDetail) {
-                    perTypeHtml = Object.keys(c.perTypeDetail).map(function(bt) {
-                        var pd = c.perTypeDetail[bt];
-                        var rateDisplay = (pd.currency === 'USD' ? '$' : '¥') + Number(pd.rate).toLocaleString();
-                        // 小计也用USD显示（与用户要求一致）
-                        var subtotalUsd = pd.rate !== null && pd.rate !== undefined
-                            ? Number(pd.rate * pd.qty).toLocaleString()
-                            : '—';
-                        return '<div class="ocean-quote-pertype">' +
-                            bt + ': ' + rateDisplay + ' × ' + pd.qty +
-                            ' = $' + subtotalUsd +
+                    ? '<span class="valid-badge ok">有效</span>'
+                    : '<span class="valid-badge expired">过期</span>';
+
+                // 箱型明细行
+                var boxDetails = '';
+                boxTypeKeys.forEach(function(bt) {
+                    var pd = c.perTypeDetail[bt];
+                    if (pd && pd.rate !== null && pd.rate !== undefined) {
+                        var rateDisplay = '$' + Number(pd.rate).toLocaleString();
+                        var subtotalUsd = Number(pd.rate * pd.qty).toLocaleString();
+                        boxDetails += '<div class="ocean-quote-box-line">' +
+                            '<span class="box-type-label">' + bt + ':</span> ' +
+                            '<span class="box-rate">' + rateDisplay + '</span> × ' +
+                            '<span class="box-qty">' + pd.qty + '</span> = ' +
+                            '<span class="box-subtotal">$' + subtotalUsd + '</span>' +
                             '</div>';
-                    }).join('');
-                }
-                var hasAllBadge = c.hasAllTypes ? ' · ✔全箱型' : '';
-                return '<div class="' + cardClass + '" data-carrier-idx="' + idx + '" style="cursor:pointer" title="点击选择此船公司">' +
-                    '<div class="ocean-quote-head">' +
-                    '<span class="ocean-quote-carrier">' + prefix + c.carrier + '</span>' +
-                    '<span class="ocean-quote-rate">$' + Number(c.totalUsd).toLocaleString() + '</span>' +
+                    }
+                });
+
+                return '<div class="' + cardClass + '" data-carrier-idx="' + idx + '">' +
+                    '<div class="ocean-quote-card-top">' +
+                        '<div class="ocean-quote-carrier">' + star + c.carrier + '</div>' +
+                        '<div class="ocean-quote-price">$' + Number(c.totalUsd).toLocaleString() + '</div>' +
                     '</div>' +
-                    '<div class="ocean-quote-meta">' +
-                    validBadge + hasAllBadge +
+                    '<div class="ocean-quote-card-meta">' +
+                        validBadge +
+                        '<span class="meta-sep">·</span>' +
+                        '<span class="meta-full">✓ 全箱型</span>' +
                     '</div>' +
-                    perTypeHtml +
+                    '<div class="ocean-quote-boxes">' + boxDetails + '</div>' +
                     '</div>';
             }).join('');
+
+            cardsHtml += '</div>';
             quotesGridEl.innerHTML = cardsHtml;
             quotesListEl.style.display = 'block';
 
-            // 默认选中第一个（最便宜）
+            // 同步渲染到另一个面板（如果存在）：表单页和结果页各有一套独立DOM
+            var otherGridId = (quotesGridEl.id === 'fpOceanQuotesGrid') ? 'oceanQuotesGrid' : 'fpOceanQuotesGrid';
+            var otherGridEl = document.getElementById(otherGridId);
+            if (otherGridEl) {
+                otherGridEl.innerHTML = cardsHtml;
+                var otherListEl = document.getElementById(otherGridId === 'fpOceanQuotesGrid' ? 'fpOceanQuotesList' : 'oceanQuotesList');
+                if (otherListEl) otherListEl.style.display = 'block';
+                // 同步点击事件到另一个面板
+                if (otherGridEl._oceanClickHandler) {
+                    otherGridEl.removeEventListener('click', otherGridEl._oceanClickHandler);
+                }
+                otherGridEl._oceanClickHandler = quotesGridEl._oceanClickHandler; // 复用同一个handler
+                otherGridEl.addEventListener('click', quotesGridEl._oceanClickHandler);
+                // 同步另一个面板的实时报价区域显示
+                var otherRealtimeEl = document.getElementById(otherGridId === 'fpOceanQuotesGrid' ? 'fpOceanRealtime' : 'oceanRealtime');
+                if (otherRealtimeEl) otherRealtimeEl.style.display = 'block';
+            }
+
+            // 默认选中第一个有效报价（最便宜）
             var firstCard = quotesGridEl.querySelector('.ocean-quote-card');
             if (firstCard) firstCard.classList.add('selected');
+            // 另一个面板也选中
+            if (otherGridEl) {
+                var otherFirstCard = otherGridEl.querySelector('.ocean-quote-card');
+                if (otherFirstCard) otherFirstCard.classList.add('selected');
+            }
 
-            // 卡片点击事件（事件委托）
-            quotesGridEl.querySelectorAll('.ocean-quote-card').forEach(function(card) {
-                card.addEventListener('click', function() {
-                    var idx = parseInt(this.getAttribute('data-carrier-idx'));
-                    var carrier = carriers[idx];
-                    if (!carrier) return;
-                    // 更新选中状态
-                    quotesGridEl.querySelectorAll('.ocean-quote-card').forEach(function(el) { el.classList.remove('selected'); });
-                    this.classList.add('selected');
-                    // 更新费用
-                    var oceanFeeInput = document.getElementById('oceanFee');
-                    oceanFeeInput.value = carrier.totalCny;
-                    feeData.ocean.fee = carrier.totalCny;
-                    feeData.ocean.selectedCarrier = carrier;
-                    feeData.ocean.allCarriers = carriers;
-                    updateGrandTotal();
-                    document.getElementById('oceanMedianRate').textContent = '¥' + carrier.totalCny.toLocaleString();
-                    document.getElementById('oceanMaxRate').textContent = '$' + carrier.totalUsd.toLocaleString();
-                    console.log('[海运费] 用户选择船公司:', carrier.carrier, '¥' + carrier.totalCny);
-                });
-            });
+            // 卡片点击事件（事件委托在网格容器上，防止重复绑定）
+            if (quotesGridEl._oceanClickHandler) {
+                quotesGridEl.removeEventListener('click', quotesGridEl._oceanClickHandler);
+            }
+            quotesGridEl._oceanClickHandler = function(e) {
+                var card = e.target.closest('.ocean-quote-card');
+                if (!card) return;
+                var idx = parseInt(card.getAttribute('data-carrier-idx'));
+                var carrier = carriers[idx];
+                if (!carrier) return;
+                // 更新选中状态
+                quotesGridEl.querySelectorAll('.ocean-quote-card').forEach(function(el) { el.classList.remove('selected'); });
+                card.classList.add('selected');
+                // 更新费用数据
+                feeData.ocean.fee = carrier.totalCny;
+                feeData.ocean.selectedCarrier = carrier;
+                feeData.ocean.allCarriers = carriers;
+                updateGrandTotal();
+                // 更新当前面板的显示
+                var oceanFeeInput = getEl('oceanFee');
+                if (oceanFeeInput) { oceanFeeInput.value = carrier.totalCny; }
+                var medianRateEl2 = getEl('oceanMedianRate');
+                if (medianRateEl2) medianRateEl2.textContent = '$' + Number(carrier.totalUsd).toLocaleString();
+                var feeSummaryEl = getEl('oceanFeeSummary');
+                if (feeSummaryEl) feeSummaryEl.textContent = '¥' + formatFee(carrier.totalCny);
+                // 同步更新结果面板（fp-前缀元素）
+                var fpOceanFeeInput = document.getElementById('fpOceanFee');
+                if (fpOceanFeeInput) { fpOceanFeeInput.value = carrier.totalCny; }
+                var fpMedianEl = document.getElementById('fpOceanMedianRate');
+                if (fpMedianEl) { fpMedianEl.textContent = '$' + Number(carrier.totalUsd).toLocaleString(); }
+                var fpSummaryEl = document.getElementById('fpOceanFeeSummary');
+                if (fpSummaryEl) { fpSummaryEl.textContent = '¥' + formatFee(carrier.totalCny); }
+                // 同步选中状态到另一个面板的卡片
+                syncOceanCardSelection(carrier.carrier);
+                console.log('[海运费] 用户选择船公司:', carrier.carrier, '¥' + carrier.totalCny);
+            };
+            quotesGridEl.addEventListener('click', quotesGridEl._oceanClickHandler);
 
             // 更新推荐航司信息
             if (routeInfo && routeInfo.recommendedShippingLine) {
                 var rec = routeInfo.recommendedShippingLine;
-                var lineEl = document.getElementById('oceanShippingLine');
+                var lineEl = getEl('oceanShippingLine');
                 if (lineEl) {
                     lineEl.textContent = '推荐航司: ' + rec.name + ' (' + rec.code + ') · ' + rec.transit_days + '天 · ' + rec.frequency;
                 }
@@ -1628,7 +1860,7 @@ async function fetchOceanFreightRate() {
 
             // 更新工厂和FCL/普货标签
             if (routeInfo) {
-                var factoryEl = document.getElementById('oceanFactoryTag');
+                var factoryEl = getEl('oceanFactoryTag');
                 if (factoryEl) {
                     factoryEl.textContent = routeInfo.factoryShort + ' · ' + origin;
                 }
@@ -1640,17 +1872,21 @@ async function fetchOceanFreightRate() {
             realtimeEl.style.display = 'block';
 
             // 自动将最便宜船公司总价填入输入框
+            // 只要拿到合约报价就覆盖后端历史估算值
             if (realCheapest) {
-                var oceanFeeInput = document.getElementById('oceanFee');
-                var currentVal = parseFloat(oceanFeeInput.value) || 0;
-                if (!oceanFeeInput.value || currentVal === 2500 || currentVal === 900 || currentVal === 0) {
-                    oceanFeeInput.value = realCheapest.totalCny;
-                    feeData.ocean.fee = realCheapest.totalCny;
-                    feeData.ocean.cheapestCarrier = realCheapest;
-                    feeData.ocean.allCarriers = carriers;
-                    updateGrandTotal();
-                }
+                var oceanFeeInput = getEl('oceanFee');
+                if (oceanFeeInput) oceanFeeInput.value = realCheapest.totalCny;
+                feeData.ocean.fee = realCheapest.totalCny;
+                feeData.ocean.cheapestCarrier = realCheapest;
+                feeData.ocean.allCarriers = carriers;
+                // 更新header summary
+                var feeSummaryEl = getEl('oceanFeeSummary');
+                if (feeSummaryEl) feeSummaryEl.textContent = '¥' + formatFee(realCheapest.totalCny);
+                updateGrandTotal();
             }
+
+            // 同步实时报价区域的显示元素到另一个面板
+            syncOceanRealtimeDisplay();
 
             console.log('[海运费] 船公司比价成功:', origin, '→', destination,
                 allCarriers.length + '家(全箱型' + carriers.length + '家), 最低: ' + (realCheapest ? realCheapest.carrier + ' ¥' + realCheapest.totalCny : '无'));
@@ -1675,6 +1911,60 @@ async function fetchOceanFreightRate() {
         }
     } finally {
         refreshBtn.classList.remove('loading');
+    }
+}
+
+// 同步船公司卡片选中状态到另一个面板（表单页 ↔ 结果页）
+function syncOceanCardSelection(carrierName) {
+    var grids = [
+        document.getElementById('oceanQuotesGrid'),
+        document.getElementById('fpOceanQuotesGrid')
+    ];
+    grids.forEach(function(grid) {
+        if (!grid) return;
+        var cards = grid.querySelectorAll('.ocean-quote-card');
+        cards.forEach(function(card) {
+            var cardCarrier = (card.querySelector('.ocean-quote-carrier')?.textContent || '').replace(/^⭐\s*/, '');
+            if (cardCarrier === carrierName) {
+                card.classList.add('selected');
+            } else {
+                card.classList.remove('selected');
+            }
+        });
+    });
+}
+
+// 同步实时报价显示元素到另一个面板（纯DOM拷贝，双向同步）
+function syncOceanRealtimeDisplay() {
+    var idPairs = [
+        'oceanMedianRate', 'oceanRouteInfo', 'oceanTransitInfo', 'oceanFetchedAt',
+        'oceanFactoryTag', 'oceanShippingLine'
+    ];
+    idPairs.forEach(function(baseId) {
+        var el1 = document.getElementById(baseId);
+        var el2 = document.getElementById('fp' + baseId);
+        // 从有内容的拷贝到另一个
+        if (el1 && el2) {
+            if (el1.textContent && el1.textContent !== '—') {
+                el2.textContent = el1.textContent;
+            } else if (el2.textContent && el2.textContent !== '—') {
+                el1.textContent = el2.textContent;
+            }
+        }
+    });
+    // 同步显示/隐藏状态
+    var rt1 = document.getElementById('oceanRealtime');
+    var rt2 = document.getElementById('fpOceanRealtime');
+    if (rt1 && rt2) {
+        if (rt1.style.display === 'block') rt2.style.display = 'block';
+        else if (rt2.style.display === 'block') rt1.style.display = 'block';
+    }
+    // 同步 oceanFee input
+    var feeEl1 = document.getElementById('oceanFee');
+    var feeEl2 = document.getElementById('fpOceanFee');
+    if (feeEl1 && feeEl2) {
+        if (feeEl1.value) feeEl2.value = feeEl1.value;
+        else if (feeEl2.value) feeEl1.value = feeEl2.value;
     }
 }
 
@@ -1828,89 +2118,224 @@ function renderFeePanel(data) {
     var container = document.querySelector('.results-container');
     if (!container) return;
 
-    // 如果已有面板，先把费用内容移回弹窗body
-    var existPanel = document.getElementById('feePanelInResults');
-    var modalBody = document.getElementById('costInfoBody');
-    if (existPanel && modalBody) {
-        var sections = existPanel.querySelectorAll('.fee-section, .route-info-card, .ocean-realtime, .ocean-loading, .ocean-error, .fee-item, .fee-total-row');
-        for (var i = 0; i < sections.length; i++) {
-            modalBody.appendChild(sections[i]);
+    // ===== 先从后端推荐结果更新 feeData =====
+    var primary = data.primary;
+    if (primary && primary.cost && primary.cost.items) {
+        var items = primary.cost.items;
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var amount = item.amount_cny || 0;
+            if (item.name.indexOf('港杂费') !== -1 || item.category.indexOf('港杂费') !== -1) {
+                feeData.portMisc.fee = amount;
+            } else if (item.name.indexOf('陆运费') !== -1 || item.category.indexOf('拖车费') !== -1) {
+                feeData.land.baseFreight = amount;
+            } else if (item.name.indexOf('VGM') !== -1) {
+                feeData.seaManager.vgmFee = amount;
+            } else if (item.name.indexOf('舱单') !== -1) {
+                feeData.seaManager.manifestFee = amount;
+                feeData.seaManager.manifestMode = 'custom';
+                feeData.seaManager.manifestCustom = amount;
+            } else if (item.name.indexOf('ICS2') !== -1) {
+                feeData.seaManager.ics2Enabled = true;
+                feeData.seaManager.ics2Fee = amount;
+            } else if (item.name.indexOf('报关') !== -1) {
+                feeData.other = feeData.other || [];
+                // 报关费存入 other
+                var found = false;
+                for (var j = 0; j < feeData.other.length; j++) {
+                    if (feeData.other[j].name === '报关费') { feeData.other[j].amount = amount; found = true; break; }
+                }
+                if (!found) feeData.other.push({name: '报关费', amount: amount});
+            } else if (item.name.indexOf('海运费') !== -1) {
+                feeData.ocean.fee = amount;
+            } else if (item.name.indexOf('保险') !== -1) {
+                feeData.other = feeData.other || [];
+                var found2 = false;
+                for (var k = 0; k < feeData.other.length; k++) {
+                    if (feeData.other[k].name === '保险费') { feeData.other[k].amount = amount; found2 = true; break; }
+                }
+                if (!found2) feeData.other.push({name: '保险费', amount: amount});
+            }
         }
-        existPanel.remove();
+        // 如果有合约海运费信息，更新 ocean fee（仅在合约费率有效时覆盖）
+        var oceanInfo = primary.oceanFreightInfo;
+        if (oceanInfo && oceanInfo.rate_cny && oceanInfo.rate_cny > 0) {
+            var contractOceanFee = oceanInfo.rate_cny * (primary.cost.box_count || 1);
+            // 仅当合约价与已设值差异较大时才覆盖
+            if (Math.abs(contractOceanFee - feeData.ocean.fee) > 1) {
+                feeData.ocean.fee = contractOceanFee;
+            }
+            feeData.ocean.contractRate = oceanInfo.rate_usd;
+            feeData.ocean.contractCarrier = oceanInfo.carrier;
+            if (oceanInfo.is_valid) {
+                feeData.ocean.source = 'contract_valid';
+            } else {
+                feeData.ocean.source = 'contract_expired';
+            }
+        }
+        feeData._fromRecommendation = true;
+        console.log('[FeeData] 已从推荐结果更新:', feeData);
     }
 
-    var modalBody = document.getElementById('costInfoBody');
-    if (!modalBody) return;
+    // 移除已有的费用面板（如果存在）
+    var existPanel = document.getElementById('feePanelInResults');
+    if (existPanel) existPanel.remove();
 
-    // 创建包装容器
-    var wrapper = document.createElement('div');
-    wrapper.id = 'feePanelInResults';
+    // 构建费用面板的HTML（从feeData取值，feeData已从后端cost.items更新）
+    var landTotal = feeData.land.baseFreight + feeData.land.tollFee + feeData.land.insideLoadFee;
+    var smTotal = getSeaManagerTotal();
+    var otherTotal = getOtherTotal();
+    var modeConf = TRANSPORT_MODE_FREIGHT[feeData.land.transportMode] || TRANSPORT_MODE_FREIGHT.direct;
 
-    // 标题
-    var title = document.createElement('h3');
-    title.style.cssText = 'font-size:0.9rem;font-weight:700;color:var(--ink);margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem';
-    title.innerHTML = '<span>💰</span> 费用信息确认（修改后点重新优化）';
-    wrapper.appendChild(title);
+    var panelHtml = '';
+    panelHtml += '<div id="feePanelInResults">';
+    panelHtml += '<h3 style="font-size:0.9rem;font-weight:700;color:var(--ink);margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem"><span>💰</span> 费用信息确认（修改后点重新优化）</h3>';
 
-    // 移动弹窗body的所有子元素到wrapper
-    while (modalBody.firstChild) {
-        wrapper.appendChild(modalBody.firstChild);
+    // 陆运费 section
+    panelHtml += '<div class="fee-section" data-fee-group="land">';
+    panelHtml += '<div class="fee-section-header" onclick="var s=this.closest(\'.fee-section\');if(s)s.classList.toggle(\'open\')">';
+    panelHtml += '<div class="fee-section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div>';
+    panelHtml += '<div class="fee-section-title">出口起运港拖车费</div>';
+    panelHtml += '<div class="fee-section-summary">¥' + formatFee(landTotal) + '</div>';
+    panelHtml += '<svg class="fee-section-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>';
+    panelHtml += '</div><div class="fee-section-body">';
+    panelHtml += '<div class="fee-item"><div class="fee-item-label">运输方式</div><select class="fee-select" onchange="feeData.land.transportMode=this.value;initLandFees(feeData.land.factoryProvince||\'\',this.value,feeData.land.factoryName||\'\',feeData.land.originPort||\'\')">';
+    ['direct','seaRail','factorySelf','landToWater'].forEach(function(m) {
+        panelHtml += '<option value="' + m + '"' + (feeData.land.transportMode === m ? ' selected' : '') + '>' + (TRANSPORT_MODE_FREIGHT[m] ? TRANSPORT_MODE_FREIGHT[m].label : m) + '</option>';
+    });
+    panelHtml += '</select></div>';
+    panelHtml += '<div class="fee-item"><div class="fee-item-label">陆运费</div><input type="number" class="fee-item-input" id="fpLandBaseFreight" value="' + feeData.land.baseFreight + '" step="0.1" min="0" oninput="feeData.land.baseFreight=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="fee-item-unit">元</span></div>';
+    panelHtml += '<div class="fee-item"' + (modeConf.hasToll ? '' : ' style="display:none"') + '><div class="fee-item-label">高速费</div><div class="toggle-wrap"><label class="toggle-switch"><input type="checkbox"' + (feeData.land.tollEnabled ? ' checked' : '') + ' onchange="feeData.land.tollEnabled=this.checked;updateFeePanelTotals()"><span class="toggle-slider"></span></label><span class="toggle-label">产生</span></div><input type="number" class="fee-item-input small" id="fpLandTollFee" value="' + feeData.land.tollFee + '" step="0.1" min="0" oninput="feeData.land.tollFee=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="fee-item-unit">元</span></div>';
+    // 内装费
+    var isJxOrAq = feeData.land.factoryProvince === '江西' || feeData.land.factoryProvince === '安徽';
+    panelHtml += '<div class="fee-item"' + (isJxOrAq ? '' : ' style="display:none"') + '><div class="fee-item-label">内装费 <span class="info-badge">江西/安庆基地</span></div><div class="toggle-wrap"><label class="toggle-switch"><input type="checkbox"' + (feeData.land.insideLoadEnabled ? ' checked' : '') + ' onchange="feeData.land.insideLoadEnabled=this.checked;updateFeePanelTotals()"><span class="toggle-slider"></span></label><span class="toggle-label">需要</span></div><input type="number" class="fee-item-input small" id="fpInsideLoadFee" value="' + feeData.land.insideLoadFee + '" step="0.1" min="0" oninput="feeData.land.insideLoadFee=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="fee-item-unit">元</span></div>';
+    panelHtml += '</div></div>';
+
+    // 海管家 section
+    panelHtml += '<div class="fee-section" data-fee-group="seaManager">';
+    panelHtml += '<div class="fee-section-header" onclick="var s=this.closest(\'.fee-section\');if(s)s.classList.toggle(\'open\')">';
+    panelHtml += '<div class="fee-section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18s1.5-2 4.5-2 4.5 2 9 2 4.5-2 4.5-2"/><path d="M21 12l-9-7-9 7"/><path d="M12 2l0 18"/></svg></div>';
+    panelHtml += '<div class="fee-section-title">海管家费用</div>';
+    panelHtml += '<div class="fee-section-summary">¥' + formatFee(smTotal) + '</div>';
+    panelHtml += '<svg class="fee-section-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>';
+    panelHtml += '</div><div class="fee-section-body">';
+    // 舱单费
+    panelHtml += '<div class="fee-item"><div class="fee-item-label">舱单费</div><select class="fee-select" id="fpManifestSelect" onchange="var v=this.value;if(v===\'custom\'){document.getElementById(\'fpManifestCustom\').style.display=\'\'}else{document.getElementById(\'fpManifestCustom\').style.display=\'none\';feeData.seaManager.manifestFee=parseFloat(v);updateFeePanelTotals()}">';
+    [55,25,35,80].forEach(function(v) { panelHtml += '<option value="' + v + '"' + (feeData.seaManager.manifestFee === v && feeData.seaManager.manifestMode !== 'custom' ? ' selected' : '') + '>' + v + '</option>'; });
+    panelHtml += '<option value="custom"' + (feeData.seaManager.manifestMode === 'custom' ? ' selected' : '') + '>自定义</option></select>';
+    panelHtml += '<input type="number" class="fee-item-input small" id="fpManifestCustom" value="' + (feeData.seaManager.manifestMode === 'custom' ? feeData.seaManager.manifestFee : '') + '" placeholder="自定义" step="0.1" min="0"' + (feeData.seaManager.manifestMode === 'custom' ? '' : ' style="display:none"') + ' oninput="feeData.seaManager.manifestFee=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="fee-item-unit">元</span></div>';
+    // VGM
+    panelHtml += '<div class="fee-item"><div class="fee-item-label">VGM费</div><input type="number" class="fee-item-input" id="fpVgmFee" value="' + feeData.seaManager.vgmFee + '" step="0.1" min="0" oninput="feeData.seaManager.vgmFee=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="fee-item-unit">元</span></div>';
+    // ICS2
+    panelHtml += '<div class="fee-item"><div class="fee-item-label">ICS2费 <span class="info-badge">仅欧洲</span></div><div class="toggle-wrap"><label class="toggle-switch"><input type="checkbox"' + (feeData.seaManager.ics2Enabled ? ' checked' : '') + ' onchange="feeData.seaManager.ics2Enabled=this.checked;updateFeePanelTotals()"><span class="toggle-slider"></span></label><span class="toggle-label">启用</span></div><input type="number" class="fee-item-input small" id="fpIcs2Fee" value="' + feeData.seaManager.ics2Fee + '" step="0.1" min="0"' + (feeData.seaManager.ics2Enabled ? '' : ' style="display:none"') + ' oninput="feeData.seaManager.ics2Fee=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="fee-item-unit"' + (feeData.seaManager.ics2Enabled ? '' : ' style="display:none"') + '>元</span></div>';
+    panelHtml += '</div></div>';
+
+    // 港杂费 section
+    panelHtml += '<div class="fee-section" data-fee-group="portMisc">';
+    panelHtml += '<div class="fee-section-header" onclick="var s=this.closest(\'.fee-section\');if(s)s.classList.toggle(\'open\')">';
+    panelHtml += '<div class="fee-section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/><circle cx="12" cy="12" r="3"/></svg></div>';
+    panelHtml += '<div class="fee-section-title">港杂费</div>';
+    panelHtml += '<div class="fee-section-summary">¥' + formatFee(feeData.portMisc.fee) + '</div>';
+    panelHtml += '<svg class="fee-section-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>';
+    panelHtml += '</div><div class="fee-section-body">';
+    panelHtml += '<div class="fee-item"><div class="fee-item-label">港杂费合计</div><input type="number" class="fee-item-input" id="fpPortMiscFee" value="' + feeData.portMisc.fee + '" step="0.1" min="0" oninput="feeData.portMisc.fee=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="fee-item-unit">元</span></div>';
+    panelHtml += '</div></div>';
+
+    // 海运费 section — 合约报价样式（默认收起）
+    panelHtml += '<div class="fee-section ocean ocean-body" data-fee-group="ocean">';
+    panelHtml += '<div class="fee-section-header" onclick="var s=this.closest(\'.fee-section\');if(s){var o=s.classList.contains(\'open\');s.classList.toggle(\'open\');if(!o){var r=s.querySelector(\'.ocean-realtime\');if(r&&r.style.display==\'none\')fetchOceanFreightRate();}}">';
+    panelHtml += '<div class="fee-section-icon ocean-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18s1.5-2 4.5-2 4.5 2 9 2 4.5-2 4.5-2"/><path d="M21 12l-9-7-9 7"/><path d="M12 2l0 18"/></svg></div>';
+    panelHtml += '<div class="fee-section-title">海运费</div>';
+    panelHtml += '<div class="fee-section-summary" id="fpOceanFeeSummary">¥' + formatFee(feeData.ocean.fee) + '</div>';
+    panelHtml += '<svg class="fee-section-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>';
+    panelHtml += '</div><div class="fee-section-body ocean-body">';
+
+    // 加载中
+    panelHtml += '<div class="ocean-loading" id="fpOceanLoading" style="display:none"><div class="ocean-spinner"></div><span>正在从合约表加载海运费报价...</span></div>';
+
+    // 加载失败
+    panelHtml += '<div class="ocean-error" id="fpOceanError" style="display:none"><div class="ocean-error-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div><div><div class="ocean-error-title">合约报价未匹配</div><div class="ocean-error-desc" id="fpOceanErrorDesc">该航线未找到合约报价</div></div><button class="ocean-retry" onclick="fetchOceanFreightRate()">重试</button></div>';
+
+    // 合约报价成功展示
+    panelHtml += '<div class="ocean-realtime" id="fpOceanRealtime" style="display:none">';
+    // 头部：合约来源 + 刷新
+    panelHtml += '<div class="ocean-realtime-header">';
+    panelHtml += '<div class="ocean-realtime-source">';
+    panelHtml += '<span class="live-dot" style="background:#10b981;box-shadow:0 0 8px #10b981"></span>';
+    panelHtml += '<span>合约报价 · 合约信息导出0806.xlsx</span>';
+    panelHtml += '</div>';
+    panelHtml += '<div class="ocean-realtime-actions"><button class="ocean-refresh" id="fpOceanRefreshBtn" onclick="fetchOceanFreightRate()" title="重新加载合约报价"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span>刷新</span></button></div>';
+    panelHtml += '</div>';
+    // 大价格展示
+    panelHtml += '<div class="ocean-realtime-rates"><div class="ocean-rate-item primary"><div class="ocean-rate-value" id="fpOceanMedianRate">—</div></div></div>';
+    // 元信息：路线 + 转运 + 时间
+    panelHtml += '<div class="ocean-realtime-meta">';
+    panelHtml += '<span id="fpOceanRouteInfo">—</span><span class="dot">·</span>';
+    panelHtml += '<span id="fpOceanTransitInfo">—</span><span class="dot">·</span>';
+    panelHtml += '<span id="fpOceanFetchedAt">—</span>';
+    panelHtml += '</div>';
+    // 标签：工厂 + 货型 + 航司
+    panelHtml += '<div class="ocean-realtime-tags">';
+    panelHtml += '<span class="ocean-tag factory-tag" id="fpOceanFactoryTag">—</span>';
+    panelHtml += '<span class="ocean-tag fcl-tag">普货 · FCL整箱</span>';
+    panelHtml += '<span class="ocean-tag carrier-tag" id="fpOceanShippingLine">—</span>';
+    panelHtml += '</div>';
+    // 分隔线 + 船公司报价
+    panelHtml += '<div class="ocean-realtime-quotes" id="fpOceanQuotesList" style="display:none">';
+    panelHtml += '<div style="font-weight:600;font-size:13px;color:#334155;margin-bottom:10px;display:flex;align-items:center;gap:6px">';
+    panelHtml += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;color:var(--accent)"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>';
+    panelHtml += '各船公司合约报价</div>';
+    panelHtml += '<div id="fpOceanQuotesGrid" style="overflow-x:auto"></div>';
+    panelHtml += '</div>';
+    panelHtml += '</div>';
+
+    // 海运费合计
+    panelHtml += '<div class="ocean-total-row"><span class="ocean-total-label">海运费合计</span><span class="ocean-total-value-wrap"><input type="number" class="ocean-total-input" id="fpOceanFee" value="' + feeData.ocean.fee + '" step="0.1" min="0" oninput="feeData.ocean.fee=parseFloat(this.value)||0;updateFeePanelTotals()"><span class="ocean-total-unit">元</span></span></div>';
+    panelHtml += '</div></div>';
+
+    // 其他费用 section
+    panelHtml += '<div class="fee-section" data-fee-group="other">';
+    panelHtml += '<div class="fee-section-header" onclick="var s=this.closest(\'.fee-section\');if(s)s.classList.toggle(\'open\')">';
+    panelHtml += '<div class="fee-section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>';
+    panelHtml += '<div class="fee-section-title">其他费用</div>';
+    panelHtml += '<div class="fee-section-summary">¥' + formatFee(otherTotal) + '</div>';
+    panelHtml += '<svg class="fee-section-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>';
+    panelHtml += '</div><div class="fee-section-body" id="fpOtherFeeBody">';
+    for (var oi = 0; oi < feeData.other.length; oi++) {
+        var o = feeData.other[oi];
+        panelHtml += '<div class="other-fee-row"><input type="text" class="other-fee-name" value="' + (o.name || '') + '" placeholder="费用类型" oninput="syncFeePanelOtherFees()"><input type="number" class="other-fee-amount" value="' + (o.amount || 0) + '" placeholder="金额" step="0.1" min="0" oninput="syncFeePanelOtherFees()"><button class="other-fee-remove" onclick="this.parentElement.remove();syncFeePanelOtherFees()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
     }
+    panelHtml += '<div class="other-fee-add" onclick="addFeePanelOtherRow()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> 添加其他费用</div>';
+    panelHtml += '</div></div>';
+
+    // 总计
+    var grandTotal = calculateAllFees();
+    panelHtml += '<div class="fee-total-row"><div class="fee-total-label">费用总计</div><div><span class="fee-total-value" id="fpGrandTotal">¥' + formatFee(grandTotal) + '</span><span class="fee-total-unit">元</span></div></div>';
 
     // 重新优化按钮
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'reoptimize-btn';
-    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;vertical-align:middle;margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> 重新优化';
-    btn.addEventListener('click', reOptimize);
-    wrapper.appendChild(btn);
+    panelHtml += '<button type="button" class="reoptimize-btn" onclick="reOptimize()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;vertical-align:middle;margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> 重新优化</button>';
 
-    // 插入到路线可视化下方的占位符位置
+    panelHtml += '</div>';  // feePanelInResults
+
+    // 插入到占位符位置
     var placeholder = document.getElementById('feePanelPlaceholder');
     if (placeholder) {
-        placeholder.parentNode.insertBefore(wrapper, placeholder);
+        var tempDiv = document.createElement('div');
+        tempDiv.innerHTML = panelHtml;
+        var panelEl = tempDiv.firstChild;
+        placeholder.parentNode.insertBefore(panelEl, placeholder);
     } else {
-        container.appendChild(wrapper);
+        // 没有占位符，插入到container末尾
+        var tempDiv = document.createElement('div');
+        tempDiv.innerHTML = panelHtml;
+        container.appendChild(tempDiv.firstChild);
     }
 
-    // 隐藏费用面板中的路线信息卡片（已在结果最上方显示）
-    var ric = wrapper.querySelector('#routeInfoCard');
-    if (ric) ric.style.display = 'none';
-
-    // 绑定费用section折叠/展开（默认陆运费展开，其余收起）
-    wrapper.querySelectorAll('.fee-section').forEach(function(s) {
-        var group = s.getAttribute('data-fee-group');
-        if (group === 'land') s.classList.add('open');  // 只有陆运费默认展开
-    });
-    wrapper.querySelectorAll('.fee-section-header').forEach(function(header) {
-        // 移除旧监听器避免重复绑定（通过克隆节点）
-        var newHeader = header.cloneNode(true);
-        header.parentNode.replaceChild(newHeader, header);
-        newHeader.addEventListener('click', function() {
-            var section = newHeader.closest('.fee-section');
-            if (section) section.classList.toggle('open');
-        });
-    });
-
-    // 同步当前feeData到移动后的输入框
-    var lbf = document.getElementById('landBaseFreight');
-    if (lbf) lbf.value = feeData.land.baseFreight;
-    var of = document.getElementById('oceanFee');
-    if (of) of.value = feeData.ocean.fee;
-    var pmf = document.getElementById('portMiscFee');
-    if (pmf) pmf.value = feeData.portMisc.fee;
-    var vf = document.getElementById('vgmFee');
-    if (vf) vf.value = feeData.seaManager.vgmFee;
-    var ltf = document.getElementById('landTollFee');
-    if (ltf) ltf.value = feeData.land.tollFee;
-    var ilf = document.getElementById('insideLoadFee');
-    if (ilf) ilf.value = feeData.land.insideLoadFee;
-
-    // 触发合约报价加载
+    // 触发合约报价加载（使用结果面板中的元素ID前缀 fp）
     autoEnableICS2ForEurope();
     setTimeout(function() {
         fetchOceanFreightRate();
-        // 港杂费推荐：直接从 data 对象取（不从 DOM 读，因为 fetchOceanFreightRate 异步未完成）
+        // 港杂费：始终从标准表实时查询，覆盖后端历史中位数估算值
         var originPort = (data.primary && data.primary.departurePort) ? data.primary.departurePort : '';
         var tradeTerm = (data.primary && data.primary.tradeTerm) ? data.primary.tradeTerm : '';
         if (tradeTerm === 'auto' || tradeTerm === '智能推荐') tradeTerm = '';
@@ -1919,6 +2344,85 @@ function renderFeePanel(data) {
             fetchPortMiscFee(originPort, tradeTerm, boxTypes);
         }
     }, 400);
+}
+
+// ===== 费用面板辅助函数（供结果面板内联事件使用） =====
+function updateFeePanelTotals() {
+    var panel = document.getElementById('feePanelInResults');
+    if (!panel) return;
+    var grandTotal = calculateAllFees();
+    // 更新结果面板中的总计
+    var gt = document.getElementById('fpGrandTotal');
+    if (gt) gt.textContent = '¥' + formatFee(grandTotal);
+    // 同步各输入框的值（从feeData → DOM）
+    var inputs = {
+        'fpLandBaseFreight': feeData.land.baseFreight,
+        'fpLandTollFee': feeData.land.tollFee,
+        'fpInsideLoadFee': feeData.land.insideLoadFee,
+        'fpVgmFee': feeData.seaManager.vgmFee,
+        'fpIcs2Fee': feeData.seaManager.ics2Fee,
+        'fpPortMiscFee': feeData.portMisc.fee,
+        'fpOceanFee': feeData.ocean.fee,
+    };
+    for (var id in inputs) {
+        var el = document.getElementById(id);
+        if (el) el.value = inputs[id];
+    }
+    // 更新各section汇总
+    var landTotal = feeData.land.baseFreight + feeData.land.tollFee + feeData.land.insideLoadFee;
+    updateFeePanelSummary('[data-fee-group="land"] .fee-section-summary', landTotal);
+    updateFeePanelSummary('[data-fee-group="seaManager"] .fee-section-summary', getSeaManagerTotal());
+    updateFeePanelSummary('[data-fee-group="portMisc"] .fee-section-summary', feeData.portMisc.fee);
+    updateFeePanelSummary('[data-fee-group="ocean"] .fee-section-summary', feeData.ocean.fee);
+    // 额外更新带fp前缀和原始ID的海运费summary
+    var oceanSummaryFp = document.getElementById('fpOceanFeeSummary');
+    if (oceanSummaryFp) oceanSummaryFp.textContent = '¥' + formatFee(feeData.ocean.fee);
+    var oceanSummaryOrig = document.getElementById('oceanFeeSummary');
+    if (oceanSummaryOrig) oceanSummaryOrig.textContent = '¥' + formatFee(feeData.ocean.fee);
+    updateFeePanelSummary('[data-fee-group="other"] .fee-section-summary', getOtherTotal());
+    // 同步更新指标卡片
+    var recCardCosts = document.querySelectorAll('.rec-card-value.mono');
+    for (var i = 0; i < recCardCosts.length; i++) {
+        var el = recCardCosts[i];
+        if (el.textContent.indexOf('¥') === 0) {
+            el.textContent = '¥' + grandTotal.toLocaleString();
+            var sub = el.parentElement.querySelector('.rec-card-sub');
+            if (sub) sub.textContent = '约 $' + Math.round(grandTotal / 7.2).toLocaleString() + ' USD';
+        }
+    }
+}
+
+function updateFeePanelSummary(selector, value) {
+    var panel = document.getElementById('feePanelInResults');
+    if (!panel) return;
+    var el = panel.querySelector(selector);
+    if (el) el.textContent = '¥' + formatFee(value);
+}
+
+function syncFeePanelOtherFees() {
+    var body = document.getElementById('fpOtherFeeBody');
+    if (!body) return;
+    var rows = body.querySelectorAll('.other-fee-row');
+    feeData.other = [];
+    for (var i = 0; i < rows.length; i++) {
+        var nameInput = rows[i].querySelector('.other-fee-name');
+        var amtInput = rows[i].querySelector('.other-fee-amount');
+        feeData.other.push({
+            name: nameInput ? nameInput.value : '',
+            amount: amtInput ? (parseFloat(amtInput.value) || 0) : 0
+        });
+    }
+    updateFeePanelTotals();
+}
+
+function addFeePanelOtherRow() {
+    var body = document.getElementById('fpOtherFeeBody');
+    if (!body) return;
+    var addBtn = body.querySelector('.other-fee-add');
+    var row = document.createElement('div');
+    row.className = 'other-fee-row';
+    row.innerHTML = '<input type="text" class="other-fee-name" placeholder="费用类型" oninput="syncFeePanelOtherFees()"><input type="number" class="other-fee-amount" placeholder="金额" step="0.1" min="0" oninput="syncFeePanelOtherFees()"><button class="other-fee-remove" onclick="this.parentElement.remove();syncFeePanelOtherFees()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+    body.insertBefore(row, addBtn);
 }
 
 // ===== 旧版费用编辑面板（保留备用） =====
@@ -2097,32 +2601,50 @@ async function reOptimize() {
         return;
     }
 
-    // 收集修改后的费用
-    var feeInputs = document.querySelectorAll('#feeEditPanel .fee-edit-input');
+    // v4: 直接从 feeData（权威数据源）构建 modifiedCostItems
+    // renderFeePanel 的 oninput 回调实时同步 feeData，无需从 DOM 读取
     var modifiedCostItems = [];
     var totalCny = 0;
-    for (var i = 0; i < feeInputs.length; i++) {
-        var input = feeInputs[i];
-        var row = input.closest('.fee-edit-row');
-        var labelEl = row ? row.querySelector('.fee-edit-label') : null;
-        var name = labelEl ? labelEl.textContent.replace(/^\d+\.\s*/, '') : '费用项';
-        var amount = parseFloat(input.value) || 0;
-        modifiedCostItems.push({ name: name, amount_cny: amount });
+
+    function pushItem(name, amount) {
+        if (amount > 0 || name.indexOf('费') !== -1) {
+            modifiedCostItems.push({ name: name, amount_cny: amount });
+        }
         totalCny += amount;
     }
 
-    // 收集其他费用
-    var otherNames = document.querySelectorAll('#feeEditPanel .other-fee-edit-name');
-    var otherAmounts = document.querySelectorAll('#feeEditPanel .other-fee-edit-amount');
-    var otherFees = [];
-    for (var j = 0; j < otherNames.length; j++) {
-        var oName = otherNames[j].value || '其他费用';
-        var oAmt = parseFloat(otherAmounts[j].value) || 0;
-        otherFees.push({ name: oName, amount: oAmt });
-        totalCny += oAmt;
+    // 陆运费
+    pushItem('陆运费', feeData.land.baseFreight);
+    if (feeData.land.tollEnabled && feeData.land.tollFee > 0) {
+        pushItem('高速费', feeData.land.tollFee);
+    }
+    if (feeData.land.insideLoadEnabled && feeData.land.insideLoadFee > 0) {
+        pushItem('内装费', feeData.land.insideLoadFee);
     }
 
-    feeData.other = otherFees;
+    // 海管家费用
+    pushItem('舱单费', feeData.seaManager.manifestFee);
+    pushItem('VGM费', feeData.seaManager.vgmFee);
+    if (feeData.seaManager.ics2Enabled && feeData.seaManager.ics2Fee > 0) {
+        pushItem('ICS2费', feeData.seaManager.ics2Fee);
+    }
+
+    // 港杂费
+    pushItem('港杂费', feeData.portMisc.fee);
+
+    // 海运费
+    pushItem('海运费', feeData.ocean.fee);
+
+    // 其他费用
+    for (var k = 0; k < feeData.other.length; k++) {
+        var o = feeData.other[k];
+        if (o.amount > 0 || (o.name && o.name.trim() !== '')) {
+            pushItem(o.name || '其他费用', o.amount);
+        }
+    }
+
+    // 重置推荐标记，允许 renderFeePanel 在下次结果返回时用新数据更新 feeData
+    feeData._fromRecommendation = false;
 
     // 更新提交数据
     var payload = JSON.parse(JSON.stringify(lastSubmitPayload));
@@ -2150,6 +2672,7 @@ async function reOptimize() {
             renderResult(result.data);
             renderFeePanel(result.data);
             renderAlternativesAfterResults(result.data.alternatives || []);
+            renderAllRoutes(result.data.allCandidates || [], result.data.primary);
             // 滚动到结果区域
             var resultsContainer = document.querySelector('.results-container');
             if (resultsContainer) {
@@ -2175,4 +2698,139 @@ function renderAlternativesAfterResults(alts) {
     var existing = container.querySelector('.alt-section');
     if (existing) existing.remove();
     container.insertAdjacentHTML('beforeend', renderAlternatives(alts));
+}
+
+// ===== 全部路线价格对比表 =====
+var allRoutesSortKey = 'totalCostCny';
+var allRoutesSortDesc = false;
+
+var _renderAllRoutesPrimary = null;
+
+function renderAllRoutes(candidates, primaryData) {
+    if (primaryData) { _renderAllRoutesPrimary = primaryData; }
+    var container = document.querySelector('.results-container');
+    if (!container) return;
+
+    // 移除已有的全部路线表
+    var existing = container.querySelector('.all-routes-section');
+    if (existing) existing.remove();
+
+    if (!candidates || candidates.length === 0) return;
+
+    // 使用传入的或缓存的 primaryData
+    var pd = primaryData || _renderAllRoutesPrimary;
+
+    // 排序
+    var sorted = candidates.slice().sort(function(a, b) {
+        var va = a[allRoutesSortKey];
+        var vb = b[allRoutesSortKey];
+        if (typeof va === 'string') {
+            return allRoutesSortDesc ? vb.localeCompare(va) : va.localeCompare(vb);
+        }
+        return allRoutesSortDesc ? (vb - va) : (va - vb);
+    });
+
+    // 找最低费用（用于标记"最低"徽章）
+    var minCost = Math.min.apply(null, candidates.map(function(c) { return c.totalCostCny || 0; }));
+
+    // 判断某条路线是否是主推荐方案（匹配工厂+始发港+目的港）
+    function isPrimaryRoute(c) {
+        if (!pd) return false;
+        var cOrigin = c.departurePort || '';
+        var pOrigin = pd.departurePort || '';
+        var cDest = c.destPort || '';
+        var pDest = pd.destPort || '';
+        var cFactory = (c.factoryShort || c.factory || '');
+        var pFactory = (pd.factoryShort || pd.factory || '');
+        // 匹配：工厂+始发港+目的港 三者都一致
+        return cFactory === pFactory && cOrigin === pOrigin && cDest === pDest;
+    }
+
+    var rowsHtml = sorted.map(function(c, idx) {
+        var isBest = (c.totalCostCny === minCost);
+        var isPrimary = isPrimaryRoute(c);
+        var sourceLabel = c.pricingSource === 'llm' ? 'LLM'
+                       : c.pricingSource === 'contract' ? '合约'
+                       : '规则';
+        var sourceClass = c.pricingSource === 'llm' ? 'source-llm'
+                        : c.pricingSource === 'contract' ? 'source-contract'
+                        : 'source-rule';
+        var qualityClass = c.dataQuality === 'high' ? 'quality-high'
+                         : c.dataQuality === 'low' ? 'quality-low'
+                         : c.dataQuality === 'llm' ? 'source-llm'
+                         : 'quality-medium';
+        var qualityLabel = c.dataQuality === 'high' ? '高'
+                         : c.dataQuality === 'low' ? '低'
+                         : c.dataQuality === 'llm' ? 'LLM'
+                         : '中';
+        var portShort = function(port) {
+            return port ? port.split('/')[0] : '—';
+        };
+        // 构建徽章：主推荐显示"最优"，但如果同时也正好是第0行则只显示"最优"
+        var badges = '';
+        if (isPrimary) {
+            badges += '<span class="best-badge">最优</span>';
+        }
+        if (isBest && !isPrimary) {
+            badges += ' <span class="best-badge" style="background:#0891b2">最低</span>';
+        }
+        return '<tr>' +
+            '<td class="route-cell">' +
+                badges +
+                (c.factoryShort || c.factory) +
+                ' <span class="sep">→</span> ' + portShort(c.departurePort) +
+                ' <span class="sep">→</span> ' + portShort(c.destPort) +
+            '</td>' +
+            '<td>' + (c.tradeTerm || '—') + '</td>' +
+            '<td class="cost-cell">' +
+                '¥' + (c.totalCostCny || 0).toLocaleString() +
+            '</td>' +
+            '<td class="days-cell">' + (c.totalDays || '?') + '天</td>' +
+            '<td class="score-cell">' + (c.score || 0) + '</td>' +
+            '<td><span class="source-tag ' + sourceClass + '">' + sourceLabel + '</span></td>' +
+            '<td style="text-align:center"><span class="' + qualityClass + '">' + qualityLabel + '</span></td>' +
+        '</tr>';
+    }).join('');
+
+    var sortInd = function(key) {
+        if (allRoutesSortKey !== key) return '';
+        return '<span class="sort-ind">' + (allRoutesSortDesc ? '▼' : '▲') + '</span>';
+    };
+
+    var html =
+        '<div class="all-routes-section">' +
+            '<div class="all-routes-header">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>' +
+                '全部路线价格对比' +
+                '<span class="count">' + candidates.length + ' 条路线</span>' +
+            '</div>' +
+            '<table class="all-routes-table">' +
+                '<thead><tr>' +
+                    '<th data-sort="factoryShort" style="min-width:180px">路线' + sortInd('factoryShort') + '</th>' +
+                    '<th data-sort="tradeTerm">条款</th>' +
+                    '<th data-sort="totalCostCny" style="text-align:right">总费用(CNY)' + sortInd('totalCostCny') + '</th>' +
+                    '<th data-sort="totalDays" style="text-align:center">时效' + sortInd('totalDays') + '</th>' +
+                    '<th data-sort="score" style="text-align:center">评分' + sortInd('score') + '</th>' +
+                    '<th style="text-align:center">价格来源</th>' +
+                    '<th style="text-align:center">数据质量</th>' +
+                '</tr></thead>' +
+                '<tbody>' + rowsHtml + '</tbody>' +
+            '</table>' +
+        '</div>';
+
+    container.insertAdjacentHTML('beforeend', html);
+
+    // 绑定排序点击
+    container.querySelector('.all-routes-table thead').addEventListener('click', function(e) {
+        var th = e.target.closest('th');
+        if (!th || !th.dataset.sort) return;
+        var key = th.dataset.sort;
+        if (allRoutesSortKey === key) {
+            allRoutesSortDesc = !allRoutesSortDesc;
+        } else {
+            allRoutesSortKey = key;
+            allRoutesSortDesc = true;
+        }
+        renderAllRoutes(candidates, pd);
+    });
 }

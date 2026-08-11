@@ -14,23 +14,12 @@ BASE_DIR = _BASE_DIR
 DATA_DIR = os.path.join(_ROOT_DIR, "data")
 
 # ===== 数据源文件路径 =====
-# 7 个基础数据文件（实际存在于 data 目录）
+# 基础数据文件（实际存在于 data 目录）
 FILES = {
     # 1. 各基地产能 — 工厂PVC/丁腈手套产能数据
     "factory_capacity": os.path.join(DATA_DIR, "各基地产能.xlsx"),
-    # 2. 海运费收入 — 发票号、海运费、客户海运费、海运费收入
-    "shipping_fee": os.path.join(DATA_DIR, "海运费收入.xlsx"),
-    # 3. 费用 — 38404条费用明细（费用大类/类型/金额）
-    "costs": os.path.join(DATA_DIR, "费用.xlsx"),
-    # 4. 集装箱运单 — 箱型/箱数/毛重/体积/装柜日期/承运商
-    "container_waybill": os.path.join(DATA_DIR, "集装箱运单.xlsx"),
-    # 5. 物料行 — 物料名称/数量/重量/体积/发货车间/付款方式
+    # 2. 物料行 — 物料名称/数量/重量/体积/发货车间/付款方式
     "material_line": os.path.join(DATA_DIR, "物料行.xlsx"),
-    # 6. 提单运单 — 客户/运抵国/贸易条款/始发港/目的港/发货工厂/时间
-    #    作为核心数据源，替代原"出口销售订单"的功能
-    "bl_waybill": os.path.join(DATA_DIR, "提单运单.xlsx"),
-    # 7. TMS费用类型 — 83种费用类型定义（费用大类/费用类型映射）
-    "tms_fee_type": os.path.join(DATA_DIR, "TMS费用类型.xlsx"),
 }
 
 # ===== LLM 配置 =====
@@ -138,3 +127,34 @@ PORT_MISC_STANDARD_FILE = os.path.join(DATA_DIR, "港杂费标准_贸易条款�
 
 # 各路线报价卡 — 用于陆运费推荐（按工厂+港口+运输方式匹配）
 ROUTE_PRICING_FILE = os.path.join(DATA_DIR, "各路线报价卡.xlsx")
+
+# 运抵国与目的港映射表 — 用于前端运抵国/终到港下拉联动
+COUNTRY_DEST_PORT_FILE = os.path.join(DATA_DIR, "运抵国与目的港.xlsx")
+
+# 各工厂最大订单数 — 用于产能过滤（工厂选择的第一道门槛）
+FACTORY_MAX_ORDERS_FILE = os.path.join(DATA_DIR, "各工厂最大订单数.xlsx")
+
+# ===== 国内始发港（11个）用于海运费比价选出最优5港 =====
+# 中文名 → 标准格式（中文/英文），用于合约匹配和费用计算
+DOMESTIC_ORIGIN_PORTS = {
+    "青岛": "青岛/QINGDAO",
+    "上海": "上海/SHANGHAI",
+    "宁波": "宁波/NINGBO",
+    "九江": "九江/JIUJIANG",
+    "镇江": "镇江/ZHENJIANG",
+    "香港": "香港/HONGKONG",
+    "深圳": "深圳/SHENZHEN",
+    "连云港": "连云港/LIANYUNGANG",
+    "南京": "南京/NANJING",
+    "厦门": "厦门/XIAMEN",
+    "天津": "天津/TIANJIN",
+}
+
+# 工厂最大订单数 → 内部工厂名映射（各工厂最大订单数.xlsx 公司列 → FACTORY_SHORT keys）
+FACTORY_MAX_ORDER_NAME_MAP = {
+    "山东英科医疗制品有限公司（潍坊）": "山东英科医疗制品有限公司",
+    "英科医疗科技股份有限公司（淄博）": "英科医疗科技股份有限公司",
+    "安徽英科医疗用品有限公司（淮北）": "安徽英科医疗用品有限公司",
+    "江西英科医疗有限公司": "江西英科医疗有限公司",
+    "安庆英科医疗有限公司": "安庆英科医疗有限公司",
+}

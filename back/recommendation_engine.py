@@ -53,12 +53,12 @@ class RecommendationEngine:
         result["engine"] = "data_driven_v2"
         result["data_sources"] = [
             "各基地产能",
-            "海运费收入",
-            "费用明细",
-            "集装箱运单",
             "物料行",
-            "提单运单（核心数据源）",
-            "TMS费用类型",
+            "合约信息导出0806",
+            "港杂费标准_贸易条款承运商箱型港口",
+            "各路线报价卡",
+            "运抵国与目的港",
+            "各工厂最大订单数",
         ]
         result["llm_enabled"] = LLM_ENABLED
 
@@ -76,7 +76,7 @@ class RecommendationEngine:
             "origin_ports": [p["port"] for p in self.kb.country_origin_ports.get(country, [])],
             "trade_terms": [{"term": t["term"], "count": t["count"]} for t in self.kb.country_trade_terms.get(country, [])],
             "ocean_days": self.kb.country_ocean_days.get(country),
-            "avg_cost": self.kb.country_avg_cost.get(country),
+            "avg_cost": getattr(self.kb, 'country_avg_cost', {}).get(country),
             "fee_breakdown": self.kb.get_fee_breakdown(country),
         }
         return info

@@ -156,6 +156,7 @@ def recommend():
             'data': {
                 'primary': _format_primary(primary, result),
                 'alternatives': [_format_alt(a) for a in alternatives],
+                'allCandidates': result.get('allCandidates', []),
                 'reasoning': result.get('reasoning', ''),
                 'riskWarning': result.get('risk_warning', ''),
                 'optimizationSuggestion': result.get('optimization_suggestion', ''),
@@ -165,6 +166,7 @@ def recommend():
                 'llmEnabled': result.get('llm_enabled', False),
                 'llmModel': result.get('llm_model', ''),
                 'eligibleFactoriesCount': result.get('eligibleFactories', 0),
+                'totalRoutes': len(result.get('allCandidates', [])),
                 'dataSources': result.get('data_sources', []),
                 'generatedAt': result.get('generatedAt', datetime.now().isoformat()),
             }
@@ -188,6 +190,7 @@ def _format_primary(p, full_result):
         'factoryShort': p.get('factory_short', ''),
         'region': p.get('region', ''),
         'departurePort': p.get('departurePort', ''),
+        'originPortCn': p.get('originPortCn', p.get('departurePort', '')),
         'destPort': p.get('destPort', ''),
         'tradeTerm': p.get('tradeTerm', ''),
         'tradeTermInfo': {
@@ -224,8 +227,11 @@ def _format_primary(p, full_result):
         'carrier': p.get('carrier', {}),
         'shippingLine': p.get('shippingLine', {}),
         'shippingLines': p.get('shippingLines', {}),
+        'oceanFreightInfo': p.get('oceanFreightInfo', {}),
         'isOverseas': p.get('region', '') == '海外',
         'needFDA': p.get('needFDA', False),
+        'pricingSource': p.get('pricingSource', 'rule_engine'),
+        'dataQuality': p.get('dataQuality', 'medium'),
     }
 
 
@@ -233,26 +239,54 @@ def _format_alt(a):
     """格式化备选方案"""
     cost = a.get('cost', {})
     timeline = a.get('timeline', {})
+    trade_info = a.get('tradeTermInfo', {})
     return {
         'factory': a.get('factory', ''),
         'factoryShort': a.get('factory_short', ''),
         'region': a.get('region', ''),
         'departurePort': a.get('departurePort', ''),
+        'originPortCn': a.get('originPortCn', a.get('departurePort', '')),
         'destPort': a.get('destPort', ''),
         'tradeTerm': a.get('tradeTerm', ''),
+        'tradeTermInfo': {
+            'full': trade_info.get('full', a.get('tradeTerm', '')),
+            'desc': trade_info.get('desc', ''),
+            'sellerResp': trade_info.get('seller_resp', ''),
+            'costScope': trade_info.get('cost_scope', ''),
+        },
         'boxType': a.get('boxType', '40HQ'),
+        'boxTypes': cost.get('box_types', [a.get('boxType', '40HQ')]),
+        'boxTypeCounts': cost.get('box_type_counts', {a.get('boxType', '40HQ'): cost.get('box_count', 1)}),
+        'boxCount': cost.get('box_count', 1),
         'score': a.get('score', 0),
         'inlandDays': timeline.get('inland_days', 0),
         'oceanDays': timeline.get('ocean_days', 0),
         'etd': timeline.get('etd', ''),
         'eta': timeline.get('eta', ''),
+        'cargoReady': timeline.get('cargo_ready', ''),
+        'shipSchedule': timeline.get('ship_schedule', ''),
         'totalDays': timeline.get('total_days', 0),
+        'timeline': timeline,
+        'cost': {
+            'items': cost.get('items', []),
+            'totalCny': cost.get('total_cny', 0),
+            'totalUsd': cost.get('total_usd', 0),
+            'currency': cost.get('currency', 'CNY'),
+            'note': cost.get('note', ''),
+            'box_count': cost.get('box_count', 1),
+            'box_types': cost.get('box_types', [a.get('boxType', '40HQ')]),
+            'box_type_counts': cost.get('box_type_counts', {a.get('boxType', '40HQ'): 1}),
+            'calc_details': cost.get('calc_details', []),
+        },
         'totalCost': cost.get('total_cny', 0),
         'totalCostCny': cost.get('total_cny', 0),
         'totalCostUsd': cost.get('total_usd', 0),
         'carrier': a.get('carrier', {}),
         'shippingLine': a.get('shippingLine', {}),
+        'oceanFreightInfo': a.get('oceanFreightInfo', {}),
         'isOverseas': a.get('region', '') == '海外',
+        'pricingSource': a.get('pricingSource', 'rule_engine'),
+        'dataQuality': a.get('dataQuality', 'medium'),
     }
 
 
@@ -352,7 +386,7 @@ def get_route_info():
     dest_code = _extract_port_code(dest_port_clean)
 
     # 5. 箱型 → 合约报价列（用于isFCL判断，整箱都是FCL）
-    is_fcl = box_type in ('20GP', '40GP', '40HQ', '45HQ', '20RF', '40RF', '40HC', '45HC')
+    is_fcl = box_type in ('20GP', '20HQ', '40GP', '40HQ', '40HC', '40NOR', '45HQ', '45HC')
     load_type = 'FCL' if is_fcl else 'LCL'
 
     # 6. 计算最大可接受转运天数
@@ -574,12 +608,14 @@ def get_freight_rate():
     bt = str(box_type).strip().upper()
     if bt in ('40HC', '40HQ', '40H'):
         box_type_norm = '40HQ'
-    elif bt == '45HC' or bt == '45HQ':
+    elif bt in ('45HC', '45HQ'):
         box_type_norm = '45HQ'
-    elif bt == '20GP':
+    elif bt in ('20GP', '20HQ'):
         box_type_norm = '20GP'
     elif bt == '40GP':
         box_type_norm = '40GP'
+    elif bt == '40NOR':
+        box_type_norm = '40GP'  # 冷代干按40GP计
     else:
         box_type_norm = '40HQ'
 
@@ -735,11 +771,13 @@ def get_freight_rate_batch():
             bt_s = str(box_type).strip().upper()
             if bt_s in ('40HC', '40HQ'):
                 bt_norm = '40HQ'
-            elif bt_s == '45HC' or bt_s == '45HQ':
+            elif bt_s in ('45HC', '45HQ'):
                 bt_norm = '45HQ'
-            elif bt_s == '20GP':
+            elif bt_s in ('20GP', '20HQ'):
                 bt_norm = '20GP'
             elif bt_s == '40GP':
+                bt_norm = '40GP'
+            elif bt_s == '40NOR':
                 bt_norm = '40GP'
 
             matched = _contract_find_rates(df, origin, destination, bt_norm)
@@ -825,10 +863,12 @@ def _contract_find_carrier_rates_multi(df, origin, destination, box_types):
             col = '40HC报价'
         elif bt_s in ('45HC', '45HQ'):
             col = '45HC报价'
-        elif bt_s == '20GP':
+        elif bt_s in ('20GP', '20HQ'):
             col = '20GP报价'
         elif bt_s == '40GP':
             col = '40GP报价'
+        elif bt_s == '40NOR':
+            col = '40GP报价'  # 冷代干按40GP计
         else:
             continue
         if col in route_matched.columns:
@@ -914,7 +954,7 @@ def compare_freight_rates():
         }), 404
 
     # 为每个船公司计算总价
-    usd_to_cny = 7.2
+    usd_to_cny = config.USD_TO_CNY
     carriers = []
     for carrier_name, info in carrier_rates.items():
         total_cny = 0
@@ -968,6 +1008,115 @@ def compare_freight_rates():
             'carrierCount': len(carriers),
             'cheapest': carriers[0] if carriers else None,
             'fetchedAt': datetime.now().isoformat(),
+        }
+    })
+
+
+# ===== 运抵国与目的港数据（来源：运抵国与目的港.xlsx）=====
+
+_COUNTRY_PORT_CACHE = None
+_COUNTRY_PORT_CACHE_TIME = 0
+
+
+def _load_country_port_data():
+    """加载运抵国与目的港映射表（带缓存）"""
+    global _COUNTRY_PORT_CACHE, _COUNTRY_PORT_CACHE_TIME
+    now = time.time()
+    if _COUNTRY_PORT_CACHE is not None and (now - _COUNTRY_PORT_CACHE_TIME) < 3600:
+        return _COUNTRY_PORT_CACHE
+
+    fpath = config.COUNTRY_DEST_PORT_FILE
+    if not os.path.exists(fpath):
+        print(f"[运抵国目的港] 文件不存在: {fpath}")
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_excel(fpath, sheet_name=0)
+        # 列: 序号, 运抵国, 目的港, 运单数
+        _COUNTRY_PORT_CACHE = df
+        _COUNTRY_PORT_CACHE_TIME = now
+        print(f"[运抵国目的港] 加载完成: {df.shape[0]} 条记录, {df['运抵国'].nunique()} 个运抵国")
+        return df
+    except Exception as e:
+        print(f"[运抵国目的港] 加载失败: {e}")
+        return pd.DataFrame()
+
+
+@app.route('/api/countries-source', methods=['GET'])
+def get_countries_from_excel():
+    """从运抵国与目的港.xlsx获取所有运抵国列表（按运单数排序）
+
+    返回:
+        {success: true, data: {countries: [{name, count}, ...]}}
+    """
+    df = _load_country_port_data()
+    if df.empty:
+        return jsonify({'success': False, 'error': '运抵国与目的港数据加载失败'}), 500
+
+    # 按运抵国聚合总数
+    country_stats = df.groupby('运抵国')['运单数'].sum().reset_index()
+    country_stats = country_stats.sort_values('运单数', ascending=False)
+
+    countries = []
+    for _, row in country_stats.iterrows():
+        countries.append({
+            'name': row['运抵国'],
+            'count': int(row['运单数']),
+        })
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'countries': countries,
+            'total': len(countries),
+        }
+    })
+
+
+@app.route('/api/dest-ports', methods=['GET'])
+def get_dest_ports():
+    """根据运抵国获取所有可用的终到港（从运抵国与目的港.xlsx，按运单数排序）
+
+    参数:
+        country — 运抵国名称（如 "美国"）
+    返回:
+        {success: true, data: {country, ports: [{port, count}, ...]}}
+    """
+    country = request.args.get('country', '')
+    if not country:
+        return jsonify({'error': '缺少 country 参数'}), 400
+
+    df = _load_country_port_data()
+    if df.empty:
+        return jsonify({'success': False, 'error': '运抵国与目的港数据加载失败'}), 500
+
+    # 筛选该运抵国的所有目的港，按运单数降序
+    subset = df[df['运抵国'] == country].copy()
+    if subset.empty:
+        return jsonify({
+            'success': True,
+            'data': {
+                'country': country,
+                'ports': [],
+                'total': 0,
+            }
+        })
+
+    subset = subset.sort_values('运单数', ascending=False)
+
+    ports = []
+    for _, row in subset.iterrows():
+        ports.append({
+            'port': str(row['目的港']),
+            'count': int(row['运单数']),
+        })
+
+    return jsonify({
+        'success': True,
+        'data': {
+            'country': country,
+            'ports': ports,
+            'total': len(ports),
         }
     })
 
@@ -1087,8 +1236,9 @@ def get_port_misc_fee():
     bt = str(box_type).strip().upper()
     if bt in ('40HC', '40HQ'): bt_norm = '40HQ'
     elif bt in ('45HC', '45HQ'): bt_norm = '45HQ'
-    elif bt == '20GP': bt_norm = '20GP'
+    elif bt in ('20GP', '20HQ'): bt_norm = '20GP'
     elif bt == '40GP': bt_norm = '40GP'
+    elif bt == '40NOR': bt_norm = '40GP'
     else: bt_norm = bt
 
     df = _load_port_misc_data()
