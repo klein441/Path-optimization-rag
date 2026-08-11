@@ -107,6 +107,7 @@ export function applyResultToFeeData(data) {
     if (!primary || !primary.cost || !primary.cost.items) return;
     var items = primary.cost.items;
     const fd = store.feeData;
+    var oceanModified = false; // 海运费是否来自用户手动修改（重新优化时保留用户确认值）
     for (var i = 0; i < items.length; i++) {
         var item = items[i];
         var amount = item.amount_cny || 0;
@@ -133,6 +134,7 @@ export function applyResultToFeeData(data) {
             if (!found) fd.other.push({ name: '报关费', amount: amount });
         } else if (item.name && item.name.indexOf('海运费') !== -1) {
             fd.ocean.fee = amount;
+            if (item.modified_by_user) oceanModified = true;
         } else if (item.name && item.name.indexOf('保险') !== -1) {
             fd.other = fd.other || [];
             var found2 = false;
@@ -144,7 +146,7 @@ export function applyResultToFeeData(data) {
     }
     // 如果有合约海运费信息，更新 ocean fee（仅在合约费率有效时覆盖）
     var oceanInfo = primary.oceanFreightInfo;
-    if (oceanInfo && oceanInfo.rate_cny && oceanInfo.rate_cny > 0) {
+    if (oceanInfo && oceanInfo.rate_cny && oceanInfo.rate_cny > 0 && !oceanModified) {
         var contractOceanFee = oceanInfo.rate_cny * (primary.cost.box_count || 1);
         if (Math.abs(contractOceanFee - fd.ocean.fee) > 1) {
             fd.ocean.fee = contractOceanFee;
@@ -154,5 +156,6 @@ export function applyResultToFeeData(data) {
         fd.ocean.source = oceanInfo.is_valid ? 'contract_valid' : 'contract_expired';
     }
     fd._fromRecommendation = true;
+    store.feeModified = {}; // 新结果回填后清除修改标记
     console.log('[FeeData] 已从推荐结果更新:', fd);
 }

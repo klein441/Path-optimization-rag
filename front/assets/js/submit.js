@@ -71,6 +71,8 @@ export async function handleSubmit() {
 
     const payload = buildPayload();
 
+    store.feeConfirmed = false;
+    store.feeModified = {};
     store.submitting = true;
     store.results.status = 'loading';
     store.metaText = '正在分析...';
@@ -100,12 +102,17 @@ export async function reOptimize() {
     }
 
     const fd = store.feeData;
+    const mods = store.feeModified || {};
+    const hasMods = Object.keys(mods).length > 0;
     var modifiedCostItems = [];
     var totalCny = 0;
 
-    function pushItem(name, amount) {
-        if (amount > 0 || name.indexOf('费') !== -1) {
-            modifiedCostItems.push({ name: name, amount_cny: amount });
+    function pushItem(name, amount, isOther) {
+        // 仅将用户实际修改过的费用项发给后端重新优化；未修改时不覆盖各路线原计算值
+        if (!hasMods || mods[name] === true || (isOther && mods.__other__ === true)) {
+            if (amount > 0 || name.indexOf('费') !== -1) {
+                modifiedCostItems.push({ name: name, amount_cny: amount });
+            }
         }
         totalCny += amount;
     }
@@ -130,7 +137,7 @@ export async function reOptimize() {
     for (var k = 0; k < fd.other.length; k++) {
         var o = fd.other[k];
         if (o.amount > 0 || (o.name && o.name.trim() !== '')) {
-            pushItem(o.name || '其他费用', o.amount);
+            pushItem(o.name || '其他费用', o.amount, true);
         }
     }
 
@@ -144,6 +151,7 @@ export async function reOptimize() {
         modifiedCostItems: modifiedCostItems
     };
 
+    store.feeConfirmed = false;
     store.submitting = true;
     store.results.status = 'loading';
     store.metaText = '正在分析...';

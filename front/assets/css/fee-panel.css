@@ -67,3 +67,38 @@
 .reoptimize-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(184,134,11,0.35)}
 .reoptimize-btn:active{transform:translateY(0)}
 
+/* ===== 重新优化 + 费用信息确认 按钮组 ===== */
+.fee-actions{display:flex;gap:0.6rem;margin-top:0.6rem;align-items:stretch}
+.fee-actions .reoptimize-btn{flex:1;margin-top:0}
+.confirm-fee-btn{
+  flex:1;padding:0.75rem;font-size:0.88rem;font-weight:600;font-family:var(--font-body);
+  color:#fff;background:linear-gradient(135deg,#166534,#22c55e);
+  border:none;border-radius:var(--radius-md);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:0.35rem;
+  transition:transform .2s ease-out,box-shadow .2s ease-out;touch-action:manipulation;min-height:44px;
+  box-shadow:0 4px 14px rgba(34,197,94,0.25);
+}
+.confirm-fee-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(34,197,94,0.35)}
+.confirm-fee-btn:active{transform:translateY(0)}
+.edit-fee-btn{
+  flex:0 0 auto;padding:0.75rem 1rem;font-size:0.85rem;font-weight:600;font-family:var(--font-body);
+  color:var(--ink);background:var(--surface-muted);border:1px solid var(--rule-strong);
+  border-radius:var(--radius-md);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:0.35rem;
+  transition:background .2s ease-out,transform .2s ease-out;touch-action:manipulation;min-height:44px;
+}
+.edit-fee-btn:hover{background:var(--rule)}
+/* ===== 费用已确认 banner ===== */
+.fee-confirmed-banner{
+  display:flex;align-items:center;gap:0.6rem;padding:0.7rem 0.9rem;margin-bottom:0.8rem;
+  border-radius:var(--radius-md);
+  background:linear-gradient(135deg,rgba(34,197,94,0.14),rgba(22,101,52,0.08));
+  border:1px solid rgba(34,197,94,0.35);
+}
+.fee-confirmed-banner svg{flex:0 0 auto;color:#16a34a}
+.fee-confirmed-title{font-size:0.82rem;font-weight:700;color:#166534}
+.fee-confirmed-total{font-size:1.05rem;font-weight:700;color:#166534;font-family:var(--font-display)}
+/* ===== 锁定状态 ===== */
+.fee-panel-in-results input:disabled,
+.fee-panel-in-results select:disabled{opacity:0.55;cursor:not-allowed;background:var(--surface-muted)}
+.toggle-switch input:disabled + .toggle-slider{opacity:0.55;cursor:not-allowed}

@@ -245,3 +245,5 @@
 }
 .ocean-total-unit{font-size:0.78rem;color:var(--muted);font-family:var(--font-mono)}
 
+/* 费用已确认时船公司卡片不可点击 */
+.ocean-quote-card.disabled{opacity:0.55;cursor:not-allowed}

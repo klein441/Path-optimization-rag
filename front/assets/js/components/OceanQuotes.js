@@ -35,7 +35,7 @@ export default {
         <div class="ocean-quotes-grid">
             <div v-for="(c, idx) in store.ocean.carriers" :key="c.carrier"
                  class="ocean-quote-card"
-                 :class="{ cheapest: idx === 0, expired: !c.isValid, selected: selectedCarrierName === c.carrier }"
+                 :class="{ cheapest: idx === 0, expired: !c.isValid, selected: selectedCarrierName === c.carrier, disabled: store.feeConfirmed }"
                  @click="selectCarrier(c)">
                 <div class="ocean-quote-card-top">
                     <div class="ocean-quote-carrier"><span v-if="idx === 0" class="star-icon">⭐</span>{{ c.carrier }}</div>

@@ -20,6 +20,7 @@ from config import (
     NORTH_AMERICA, FDA_COUNTRIES,
     FACTORY_MAX_ORDERS_FILE, DOMESTIC_ORIGIN_PORTS, FACTORY_MAX_ORDER_NAME_MAP,
     CONTRACT_FREIGHT_FILE, CONTRACT_BOX_COLUMNS,
+    CNY_TO_USD,
 )
 from knowledge_base import KnowledgeBase
 from cost_calculator import CostCalculator
@@ -379,6 +380,41 @@ class LLMClient:
 
         return top_5
 
+    def _apply_modified_cost_items(self, cost, input_data):
+        """重新优化：按用户在前端手动修改后的费用覆盖各候选路线的费用项，并重算总额"""
+        cost_info = input_data.get("costInfo") or {}
+        modified = cost_info.get("modifiedCostItems") or []
+        if not modified:
+            return
+        mod_map = {}
+        for item in modified:
+            name = (item.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                amt = float(item.get("amount_cny") or 0)
+            except (TypeError, ValueError):
+                amt = 0.0
+            mod_map[name] = amt
+        if not mod_map:
+            return
+
+        items = cost.get("items") or []
+        for it in items:
+            it_name = it.get("name") or ""
+            for mod_name, mod_amt in mod_map.items():
+                # 精确匹配，或前缀匹配（如“海运费（合约价）”匹配“海运费”）
+                if it_name == mod_name or it_name.startswith(mod_name):
+                    it["amount_cny"] = round(mod_amt, 2)
+                    if "amount_usd" in it:
+                        it["amount_usd"] = round(mod_amt * CNY_TO_USD, 2)
+                    it["modified_by_user"] = True
+                    break
+        total_cny = round(sum(i.get("amount_cny", 0) for i in items), 2)
+        cost["total_cny"] = total_cny
+        cost["total_usd"] = round(total_cny * CNY_TO_USD, 2)
+        cost["modified_by_user"] = True
+
     def _generate_candidates(self, input_data):
         """
         v3 算法：生成候选方案列表
@@ -450,6 +486,9 @@ class LLMClient:
 
                 pricing_source = "contract" if port_info.get("rate_cny", 0) > 0 else "rule_engine"
                 cost["pricing_source"] = pricing_source
+
+                # 重新优化：按用户手动修改后的费用覆盖并重算总额（使修改后的费用参与路线排序与评分）
+                self._apply_modified_cost_items(cost, input_data)
 
                 # 计算时间线
                 timeline = self._calculate_timeline(input_data, factory_name, dest_country)

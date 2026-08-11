@@ -17,7 +17,9 @@ export function updateRouteInfoCard(factory, originPort, destPort) {
 // 选择船公司报价卡：更新费用数据（表单页与结果页同时生效）
 export function selectOceanCarrier(carrier) {
     if (!carrier) return;
+    if (store.feeConfirmed) return; // 费用已确认，不允许再切换船公司
     store.feeData.ocean.fee = carrier.totalCny;
+    store.feeModified['海运费'] = true; // 用户选择船公司视为手动修改海运费
     store.feeData.ocean.selectedCarrier = carrier;
     store.feeData.ocean.allCarriers = store.ocean.carriers;
     store.ocean.medianRateText = '$' + Number(carrier.totalUsd).toLocaleString();
@@ -153,11 +155,14 @@ export async function fetchOceanFreightRate() {
             store.ocean.error = false;
 
             // 自动将最便宜船公司总价填入（只要拿到合约报价就覆盖后端历史估算值）
-            if (realCheapest) {
+            if (realCheapest && !store.feeConfirmed) {
                 store.feeData.ocean.fee = realCheapest.totalCny;
                 store.feeData.ocean.cheapestCarrier = realCheapest;
                 store.feeData.ocean.allCarriers = carriers;
                 store.feeData.ocean.selectedCarrier = realCheapest;
+            } else if (realCheapest) {
+                store.feeData.ocean.cheapestCarrier = realCheapest;
+                store.feeData.ocean.allCarriers = carriers;
             }
 
             console.log('[海运费] 船公司比价成功:', origin, '→', destination,
