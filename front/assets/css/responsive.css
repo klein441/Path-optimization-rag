@@ -1,5 +1,8 @@
 /* Responsive */
 @media(max-width:968px){
+  .timeline{overflow-x:auto;padding-bottom:0.4rem}
+  .timeline-item{min-width:132px}
+
   .app-main{grid-template-columns:1fr;padding:1.5rem}
   .rec-grid{grid-template-columns:repeat(2,1fr)}
   .header-right{display:none}
