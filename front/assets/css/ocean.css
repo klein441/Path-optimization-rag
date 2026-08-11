@@ -1,0 +1,247 @@
+/* ===== Ocean Realtime ===== */
+.ocean-realtime{
+  background:var(--surface-muted);
+  border:1px solid rgba(184,134,11,0.15);
+  border-radius:var(--radius-md);
+  padding:0.9rem 1.1rem;
+  margin-bottom:0.8rem;
+}
+.ocean-realtime-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:0.7rem}
+.ocean-realtime-source{display:flex;align-items:center;gap:0.4rem;font-size:0.78rem;font-weight:600;color:var(--accent);font-family:var(--font-mono);letter-spacing:0.03em}
+.live-dot{
+  width:8px;height:8px;border-radius:50%;background:#10b981;
+  animation:livePulse 2s ease-in-out infinite;
+}
+@keyframes livePulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0.4)}
+  50%{box-shadow:0 0 0 6px rgba(16,185,129,0)}
+}
+.ocean-realtime-actions{display:flex;gap:0.3rem}
+.ocean-refresh{
+  display:flex;align-items:center;gap:0.3rem;padding:4px 10px;border-radius:var(--radius-sm);
+  border:1px solid var(--rule);background:var(--surface);cursor:pointer;font-size:0.74rem;color:var(--muted);
+  transition:all .2s ease-out;font-family:var(--font-mono);letter-spacing:0.03em;
+}
+.ocean-refresh:hover{border-color:var(--accent);color:var(--accent)}
+.ocean-refresh svg{width:14px;height:14px}
+.ocean-refresh.loading svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.ocean-realtime-rates{
+  display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:0.5rem;margin-bottom:0.5rem;
+}
+.ocean-rate-item{
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius-sm);padding:0.55rem 0.8rem;
+  text-align:center;
+}
+.ocean-rate-item.primary{
+  background:var(--accent-muted);
+  border-color:rgba(184,134,11,0.25);
+}
+.ocean-rate-label{font-family:var(--font-mono);font-size:0.64rem;color:var(--muted);font-weight:500;margin-bottom:3px;letter-spacing:0.06em;text-transform:uppercase}
+.ocean-rate-value{
+  font-family:var(--font-display);font-size:1.1rem;font-weight:600;color:var(--ink);
+}
+.ocean-rate-item.primary .ocean-rate-value{color:var(--accent)}
+
+.ocean-realtime-meta{
+  display:flex;align-items:center;gap:0.4rem;font-size:0.7rem;color:var(--muted);margin-bottom:0.5rem;flex-wrap:wrap;
+}
+.ocean-realtime-meta .dot{opacity:0.4}
+
+/* 工厂/FCL/航司标签 */
+.ocean-realtime-tags{
+  display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.5rem;
+}
+.ocean-tag{
+  display:inline-flex;align-items:center;gap:0.25rem;padding:3px 8px;
+  border-radius:3px;font-size:0.68rem;font-weight:600;white-space:nowrap;
+  font-family:var(--font-mono);letter-spacing:0.03em;
+}
+.ocean-tag.factory-tag{
+  background:var(--accent-muted);color:var(--accent);border:1px solid rgba(184,134,11,0.2);
+}
+.ocean-tag.fcl-tag{
+  background:rgba(107,107,107,0.06);color:var(--muted);border:1px solid rgba(107,107,107,0.15);
+}
+.ocean-tag.carrier-tag{
+  background:rgba(212,168,75,0.06);color:var(--accent2-dark);border:1px solid rgba(212,168,75,0.2);
+}
+
+.ocean-realtime-apply{
+  display:flex;align-items:center;justify-content:space-between;gap:0.5rem;
+  padding-top:0.55rem;border-top:1px dashed var(--rule);
+}
+.ocean-realtime-apply span{font-size:0.74rem;color:var(--muted)}
+.ocean-apply-btn{
+  display:flex;align-items:center;gap:0.3rem;padding:6px 14px;border-radius:var(--radius-sm);
+  border:none;background:var(--accent-grad);
+  color:#fff;font-size:0.78rem;font-weight:600;cursor:pointer;transition:transform .2s ease-out,box-shadow .2s ease-out;
+  touch-action:manipulation;min-height:44px;
+}
+.ocean-apply-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(184,134,11,0.3)}
+.ocean-apply-btn svg{width:14px;height:14px}
+
+/* ===== 船公司合约报价卡片 ===== */
+.ocean-quotes-grid{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;
+}
+.ocean-quote-card{
+  background:var(--surface);border:1.5px solid var(--rule);border-radius:var(--radius-md);
+  padding:12px 14px;cursor:pointer;transition:all .15s ease-out;position:relative;
+}
+.ocean-quote-card:hover{
+  border-color:rgba(184,134,11,0.45);box-shadow:0 2px 8px rgba(184,134,11,0.08);
+}
+
+/* 最便宜卡片：⭐ + 金色船公司名 + 浅绿背景，无特殊边框 */
+.ocean-quote-card.cheapest{
+  background:#f0fdf4;
+}
+.ocean-quote-card.cheapest .ocean-quote-carrier{color:var(--accent)}
+.ocean-quote-card.cheapest .ocean-quote-price{color:var(--accent)}
+
+/* 选中状态：绿色边框 + 浅绿背景 + 阴影 */
+.ocean-quote-card.selected{
+  background:#f0fdf4;border-color:#22c55e;box-shadow:0 2px 14px rgba(34,197,94,0.18);
+}
+.ocean-quote-card.selected .ocean-quote-price{color:var(--accent)}
+
+/* 同时最便宜+选中 */
+.ocean-quote-card.cheapest.selected{
+  background:#f0fdf4;border-color:#22c55e;box-shadow:0 2px 14px rgba(34,197,94,0.18);
+}
+
+/* 过期卡片：整体降透明度 + 价格灰色 */
+.ocean-quote-card.expired{opacity:0.6}
+.ocean-quote-card.expired .ocean-quote-price{color:#a3a3a3 !important}
+.ocean-quote-card.expired:hover{opacity:0.75}
+
+.ocean-quote-card-top{
+  display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;
+}
+.ocean-quote-carrier{
+  font-weight:700;font-size:0.88rem;color:var(--ink);display:flex;align-items:center;gap:4px;
+}
+.ocean-quote-carrier .star-icon{font-size:0.9rem;line-height:1}
+.ocean-quote-price{
+  font-weight:700;font-size:1.25rem;color:var(--accent);font-family:var(--font-mono);
+  white-space:nowrap;letter-spacing:-0.01em;
+}
+.ocean-quote-card-meta{
+  display:flex;align-items:center;gap:5px;margin-bottom:6px;font-size:0.7rem;
+}
+.ocean-quote-card-meta .valid-badge{
+  display:inline-block;padding:1px 7px;border-radius:3px;font-size:0.62rem;
+  font-weight:600;font-family:var(--font-mono);letter-spacing:0.03em;
+}
+.ocean-quote-card-meta .valid-badge.ok{background:#dcfce7;color:#16a34a}
+.ocean-quote-card-meta .valid-badge.expired{background:#f3f4f6;color:#9ca3af}
+.ocean-quote-card-meta .meta-sep{color:var(--muted);font-size:0.7rem}
+.ocean-quote-card-meta .meta-full{color:var(--muted);font-size:0.7rem}
+.ocean-quote-boxes{
+  border-top:1px solid var(--rule);padding-top:6px;
+}
+.ocean-quote-box-line{
+  font-size:0.72rem;color:var(--muted);line-height:1.65;font-family:var(--font-mono);
+}
+.ocean-quote-box-line .box-type-label{color:var(--muted);font-weight:500}
+.ocean-quote-box-line .box-rate{color:var(--ink);font-weight:600}
+.ocean-quote-box-line .box-qty{color:var(--muted)}
+.ocean-quote-box-line .box-subtotal{color:var(--ink);font-weight:600}
+
+.ocean-loading{
+  display:flex;align-items:center;gap:0.5rem;padding:0.8rem 1rem;
+  background:var(--surface-muted);border-radius:var(--radius-md);
+  margin-bottom:0.8rem;font-size:0.84rem;color:var(--muted);
+}
+.ocean-spinner{
+  width:16px;height:16px;border:2px solid var(--rule-strong);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin 0.8s linear infinite;
+}
+
+.ocean-error{
+  display:flex;align-items:center;gap:0.7rem;padding:0.8rem 1rem;
+  background:rgba(220,38,38,0.04);border:1px solid rgba(220,38,38,0.15);
+  border-radius:var(--radius-md);margin-bottom:0.8rem;
+}
+.ocean-error-icon svg{width:20px;height:20px;color:var(--danger);flex-shrink:0}
+.ocean-error-title{font-size:0.84rem;font-weight:600;color:var(--ink)}
+.ocean-error-desc{font-size:0.76rem;color:var(--muted);margin-top:2px}
+.ocean-retry{
+  margin-left:auto;padding:5px 12px;border-radius:var(--radius-sm);border:1px solid var(--danger);
+  background:transparent;color:var(--danger);font-size:0.76rem;font-weight:600;cursor:pointer;
+  transition:background .2s ease-out;font-family:var(--font-mono);letter-spacing:0.03em;
+}
+.ocean-retry:hover{background:rgba(220,38,38,0.08)}
+
+/* ===== Ocean Freight in Results Panel ===== */
+.fee-panel-in-results .fee-section.ocean-body,
+.fee-section-body.ocean-body{
+  padding:1.1rem 1.2rem;
+}
+.fee-section.ocean .fee-section-body.ocean-body{
+  display:block;padding:1.1rem 1.2rem;border-top:1px solid var(--rule);
+}
+.fee-section.ocean.open .fee-section-body.ocean-body{display:block}
+.fee-section:not(.open) .fee-section-body.ocean-body{display:none}
+
+.fee-section-icon.ocean-icon svg{width:16px;height:16px}
+
+/* 实时报价区域 — 大价格展示（居中USD，金色大字） */
+.ocean-realtime-rates{
+  display:flex;justify-content:center;align-items:center;
+  margin:0.3rem 0 0.5rem;
+}
+.ocean-rate-item.primary{
+  background:linear-gradient(135deg,rgba(184,134,11,0.08),rgba(184,134,11,0.02));
+  border:1px solid rgba(184,134,11,0.2);
+  border-radius:var(--radius-md);
+  padding:0.8rem 1.4rem;
+  text-align:center;
+}
+.ocean-rate-item.primary .ocean-rate-value{
+  font-size:1.8rem;font-weight:700;color:var(--accent);
+  font-family:var(--font-mono);letter-spacing:0.02em;
+}
+
+/* 元信息行（居中显示航线/转运/时间） */
+.ocean-realtime-meta{
+  display:flex;align-items:center;justify-content:center;gap:0.4rem;
+  flex-wrap:wrap;margin-bottom:0.6rem;
+  font-size:0.76rem;color:var(--muted);font-family:var(--font-mono);
+}
+
+/* 标签行（工厂/货型/航司） */
+.ocean-realtime-tags{
+  display:flex;flex-wrap:wrap;gap:0.45rem;margin-bottom:0.8rem;
+}
+.ocean-tag{
+  display:inline-flex;align-items:center;gap:0.25rem;
+  padding:3px 10px;border-radius:var(--radius-sm);
+  font-size:0.72rem;font-weight:500;
+}
+
+/* 海运费合计行 */
+.ocean-total-row{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-top:0.9rem;padding-top:0.8rem;border-top:1px solid var(--rule);
+}
+.ocean-total-label{
+  font-size:0.86rem;font-weight:600;color:var(--ink);
+}
+.ocean-total-value-wrap{
+  display:flex;align-items:center;gap:0.35rem;
+}
+.ocean-total-input{
+  width:120px;padding:5px 10px;border:1px solid var(--rule-strong);
+  border-radius:var(--radius-sm);font-size:0.88rem;text-align:right;
+  font-family:var(--font-mono);color:var(--ink);background:var(--surface);
+  outline:none;transition:border-color .2s ease-out;
+}
+.ocean-total-input:focus{
+  border-color:var(--accent);box-shadow:0 0 0 2px rgba(184,134,11,0.12);
+}
+.ocean-total-unit{font-size:0.78rem;color:var(--muted);font-family:var(--font-mono)}
+

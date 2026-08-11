@@ -1,0 +1,15 @@
+/* Responsive */
+@media(max-width:968px){
+  .app-main{grid-template-columns:1fr;padding:1.5rem}
+  .rec-grid{grid-template-columns:repeat(2,1fr)}
+  .header-right{display:none}
+  .header-stat{display:none}
+}
+@media(max-width:520px){
+  .form-grid{grid-template-columns:1fr}
+  .rec-grid{grid-template-columns:1fr}
+  .route-flow{flex-direction:column;gap:0.5rem}
+  .route-arrow{transform:rotate(90deg)}
+  .route-arrow .ra-line{width:2px;height:24px}
+  .route-arrow .ra-line::after{right:50%;top:auto;bottom:-1px;transform:translateX(50%);border:4px solid transparent;border-top-color:var(--accent2)}
+}

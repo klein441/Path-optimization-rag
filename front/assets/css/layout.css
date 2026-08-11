@@ -1,0 +1,56 @@
+/* ===== Header ===== */
+.app-header{
+  background:var(--surface);
+  border-bottom:1px solid var(--rule);
+  padding:1.2rem 2.5rem;
+  position:sticky;top:0;z-index:100;
+  box-shadow:var(--shadow-sm);
+}
+.header-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.header-left{display:flex;align-items:center;gap:1rem}
+.logo-badge{
+  width:44px;height:44px;border-radius:var(--radius-md);
+  background:var(--accent-grad);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(184,134,11,0.25);
+  flex-shrink:0;
+}
+.logo-badge svg{width:26px;height:26px;color:#fff}
+.header-title{font-family:var(--font-display);font-size:1.2rem;font-weight:600;color:var(--ink);letter-spacing:-0.01em}
+.header-sub{font-size:0.72rem;color:var(--muted);margin-top:2px;font-family:var(--font-mono);letter-spacing:0.05em;text-transform:uppercase}
+.header-right{display:flex;align-items:center;gap:1.5rem}
+.status-dot{display:flex;align-items:center;gap:0.4rem;font-size:0.72rem;color:var(--muted);font-family:var(--font-mono);letter-spacing:0.05em;text-transform:uppercase}
+.status-dot::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px rgba(22,163,74,0.12)}
+.header-stat{display:flex;flex-direction:column;align-items:flex-end}
+.header-stat b{font-family:var(--font-display);font-size:1.2rem;color:var(--accent);line-height:1}
+.header-stat span{font-size:0.65rem;color:var(--muted);margin-top:2px;font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase}
+
+/* ===== Main Layout ===== */
+.app-main{
+  max-width:1200px;margin:0 auto;padding:2rem 2.5rem 4rem;
+  display:grid;grid-template-columns:minmax(380px,420px) 1fr;gap:2rem;align-items:start;
+}
+
+/* ===== Panels ===== */
+.panel{
+  background:var(--surface);
+  border:1px solid var(--rule);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-sm);
+  overflow:hidden;
+}
+.panel-header{
+  padding:1.2rem 1.6rem;
+  border-bottom:1px solid var(--rule);
+  display:flex;align-items:center;gap:0.75rem;
+}
+.panel-header .icon-wrap{
+  width:34px;height:34px;border-radius:var(--radius-sm);
+  background:var(--accent-muted);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.panel-header .icon-wrap svg{width:18px;height:18px;color:var(--accent)}
+.panel-header h2{font-family:var(--font-display);font-size:1.05rem;font-weight:600;color:var(--ink)}
+.panel-header .sub{font-size:0.7rem;color:var(--muted);margin-left:auto;font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase}
+.panel-body{padding:1.6rem}
+

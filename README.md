@@ -14,10 +14,22 @@ Path optimization/
 │   ├── cost_calculator.py      # 费用计算器
 │   ├── llm_client.py           # LLM客户端（含规则引擎降级）
 │   └── recommendation_engine.py # 推荐引擎
-├── front/                      # 前端代码
-│   ├── logistics-optimizer.html # 主页面
+├── front/                      # 前端代码（Vue 3 模块化）
+│   ├── logistics-optimizer.html # 主页面（Vue 入口）
 │   └── assets/
-│       └── app.js              # 前端交互逻辑
+│       ├── css/               # 样式（按模块拆分）
+│       ├── vendor/            # Vue 3 本地 ESM（无构建）
+│       └── js/                # JS 模块
+│           ├── constants.js   # 常量
+│           ├── state.js       # 全局响应式状态
+│           ├── api.js         # API 请求封装
+│           ├── fees.js        # 费用计算
+│           ├── ocean.js       # 海运费合约比价
+│           ├── submit.js      # 提交 / 重新优化
+│           ├── utils.js       # 工具函数
+│           ├── App.js         # 根组件
+│           ├── main.js        # 入口
+│           └── components/    # Vue 组件（表单/结果/费用面板/弹窗等）
 ├── data/                       # 数据文件（Excel）
 │   ├── 各基地产能.xlsx
 │   ├── 海运费收入.xlsx
@@ -47,7 +59,7 @@ python main.py
 
 服务启动后访问：
 - 后端 API: `http://localhost:5000`
-- 前端页面: 直接用浏览器打开 `front/logistics-optimizer.html`
+- 前端页面: 启动服务后访问 `http://localhost:5000`（前端为 ES Modules，需经 HTTP 访问）
 
 ### 3. 配置 LLM（可选）
 
@@ -92,7 +104,7 @@ python main.py
 ## 技术架构
 
 - **后端**: Flask + Pandas + NumPy
-- **前端**: 原生 HTML/CSS/JavaScript
+- **前端**: Vue 3（本地 ES Modules，无构建工具）+ 模块化 JS / 拆分 CSS
 - **LLM**: 可选，支持任何兼容 OpenAI API 的模型
 - **数据源**: 7 张 Excel 表格（提单运单、物料行、集装箱运单、费用明细、海运费收入、各基地产能、TMS费用类型）
 - **核心引擎**: 规则引擎（始终可用）+ LLM 增强（有API Key时）

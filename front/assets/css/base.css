@@ -1,0 +1,63 @@
+/* ===== Google Fonts ===== */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@400;500;600&display=swap');
+
+/* ===== Design Tokens — Serif Editorial System ===== */
+:root{
+  --bg:#FAFAF8;
+  --surface:#FFFFFF;
+  --surface-solid:#FFFFFF;
+  --surface-muted:#F5F3F0;
+  --ink:#1A1A1A;
+  --muted:#6B6B6B;
+  --muted-light:#9B9589;
+  --rule:#E8E4DF;
+  --rule-strong:#D4CFC8;
+  --accent:#B8860B;
+  --accent-dark:#9A6F0A;
+  --accent2:#D4A84B;
+  --accent2-dark:#B8932F;
+  --accent-muted:rgba(184,134,11,0.06);
+  --accent-grad:linear-gradient(135deg,#B8860B,#D4A84B);
+  --success:#16a34a;
+  --warning:#B8860B;
+  --danger:#dc2626;
+  --radius-sm:4px;
+  --radius-md:6px;
+  --radius-lg:8px;
+  --shadow-sm:0 1px 3px rgba(26,26,26,0.04),0 1px 2px rgba(26,26,26,0.03);
+  --shadow-md:0 4px 16px rgba(26,26,26,0.06),0 2px 6px rgba(26,26,26,0.04);
+  --shadow-lg:0 12px 40px rgba(26,26,26,0.08),0 4px 12px rgba(26,26,26,0.05);
+  --shadow-accent:0 4px 16px rgba(184,134,11,0.15),0 2px 6px rgba(184,134,11,0.08);
+  --font-display:'Playfair Display',Georgia,'Times New Roman',serif;
+  --font-body:'Source Sans 3','PingFang SC','Microsoft YaHei',sans-serif;
+  --font-mono:'IBM Plex Mono','SF Mono','Cascadia Code',monospace;
+}
+
+/* ===== Reset & Base ===== */
+*{margin:0;padding:0;box-sizing:border-box}
+html{font-size:16px}
+body{
+  font-family:var(--font-body);
+  background:var(--bg);
+  color:var(--ink);
+  line-height:1.75;
+  min-height:100vh;
+  position:relative;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
+
+/* Ambient glow */
+body::before{
+  content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background:radial-gradient(ellipse at 50% 30%,rgba(184,134,11,0.04),transparent 60%);
+}
+
+/* Paper texture overlay */
+body::after{
+  content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:0.03;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat:repeat;background-size:256px 256px;
+}
+

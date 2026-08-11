@@ -1,0 +1,69 @@
+/* ===== Fee Panel in Results ===== */
+.fee-panel-in-results{
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius-md);
+  margin-top:1.2rem;padding:1.2rem;
+}
+.fee-panel-in-results .fee-section{margin-bottom:0.6rem}
+.fee-panel-in-results .fee-section:last-child{margin-bottom:0}
+
+/* ===== Fee Edit Panel (legacy, kept for reference) ===== */
+.fee-edit-panel{
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--radius-md);
+  margin-top:1.4rem;overflow:hidden;
+}
+.fee-edit-header{
+  padding:1rem 1.2rem;cursor:pointer;user-select:none;
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--surface-muted);
+  border-bottom:1px solid var(--rule);
+}
+.fee-edit-header h3{font-family:var(--font-display);font-size:0.92rem;font-weight:600;color:var(--ink);margin:0}
+.fee-edit-toggle{color:var(--muted);font-size:0.7rem;transition:transform .2s}
+.fee-edit-panel.collapsed .fee-edit-toggle{transform:rotate(-90deg)}
+.fee-edit-panel.collapsed .fee-edit-body{display:none}
+.fee-edit-body{padding:1.1rem 1.2rem}
+.fee-edit-row{
+  display:flex;align-items:center;gap:0.5rem;padding:0.45rem 0;
+  border-bottom:1px solid var(--rule);flex-wrap:wrap;
+}
+.fee-edit-row:last-child{border-bottom:none}
+.fee-edit-label{flex:1;font-size:0.84rem;font-weight:600;color:var(--ink);min-width:6rem}
+.fee-edit-basis{font-size:0.68rem;color:var(--muted);flex:2;min-width:8rem}
+.fee-edit-input{
+  width:100px;padding:4px 8px;border:1px solid var(--rule-strong);border-radius:var(--radius-sm);
+  font-size:0.84rem;text-align:right;font-family:var(--font-mono);color:var(--ink);
+  background:var(--surface);outline:none;transition:border-color .2s ease-out;
+}
+.fee-edit-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(184,134,11,0.12)}
+.fee-edit-unit{font-size:0.74rem;color:var(--muted);font-family:var(--font-mono)}
+.fee-edit-usd{font-size:0.7rem;color:var(--muted-light);white-space:nowrap}
+.fee-edit-divider{height:1px;background:var(--rule);margin:0.55rem 0}
+.fee-edit-subtitle{font-family:var(--font-mono);font-size:0.7rem;font-weight:500;color:var(--muted);margin-bottom:0.3rem;letter-spacing:0.06em;text-transform:uppercase}
+.other-fee-edit-name{flex:2;padding:4px 8px;border:1px solid var(--rule-strong);border-radius:var(--radius-sm);font-size:0.82rem;min-width:6rem}
+.other-fee-edit-amount{width:100px;padding:4px 8px;border:1px solid var(--rule-strong);border-radius:var(--radius-sm);font-size:0.82rem;text-align:right;font-family:var(--font-mono)}
+.other-fee-edit-remove{width:24px;height:24px;border-radius:var(--radius-sm);border:none;background:rgba(220,38,38,0.08);color:var(--danger);cursor:pointer;font-size:1rem;line-height:1;transition:background .2s ease-out}
+.other-fee-edit-remove:hover{background:rgba(220,38,38,0.18)}
+.add-other-fee-btn{
+  display:flex;align-items:center;gap:0.3rem;padding:0.4rem 0;
+  font-size:0.8rem;font-weight:600;color:var(--accent);cursor:pointer;
+  background:none;border:none;margin-top:0.3rem;transition:color .2s ease-out;
+}
+.add-other-fee-btn:hover{color:var(--accent-dark)}
+.fee-edit-total-row{
+  display:flex;align-items:center;gap:0.6rem;padding:0.9rem 0;
+  margin-top:0.7rem;border-top:2px solid var(--rule-strong);
+}
+.fee-edit-total-label{font-family:var(--font-display);font-size:0.95rem;font-weight:600;color:var(--ink)}
+#feeEditTotal{font-family:var(--font-display);font-size:1.15rem;font-weight:600;color:var(--accent)}
+.fee-edit-total-usd{font-size:0.74rem;color:var(--muted);margin-left:0.3rem;font-family:var(--font-mono)}
+.reoptimize-btn{
+  width:100%;padding:0.75rem;font-size:0.88rem;font-weight:600;font-family:var(--font-body);
+  color:#fff;background:linear-gradient(135deg,#B8860B,#D4A84B);
+  border:none;border-radius:var(--radius-md);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .2s ease-out,box-shadow .2s ease-out;margin-top:0.5rem;touch-action:manipulation;min-height:44px;
+  box-shadow:0 4px 14px rgba(184,134,11,0.25);
+}
+.reoptimize-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(184,134,11,0.35)}
+.reoptimize-btn:active{transform:translateY(0)}
+
