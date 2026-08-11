@@ -64,6 +64,14 @@ export async function handleSubmit() {
         alert('请选择至少一种集装箱箱型');
         return;
     }
+    if (!form.destCountry) {
+        alert('请选择运抵国 / 地区');
+        return;
+    }
+    if (!form.destPort) {
+        alert('请选择或填写终到港');
+        return;
+    }
     if (!form.cargoReady || !form.shipSchedule) {
         alert('请填写日期信息');
         return;
