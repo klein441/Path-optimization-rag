@@ -1588,7 +1588,8 @@ function renderAlternatives(alts) {
 async function fetchOceanFreightRate() {
     // 辅助函数：优先查找带fp前缀的结果面板元素，回退到原始HTML元素
     function getEl(id) {
-        var el = document.getElementById('fp' + id);
+        // 结果面板元素ID为 fpOceanXxx（大写O），这里首字母大写后再拼接
+        var el = document.getElementById('fp' + id.charAt(0).toUpperCase() + id.slice(1));
         if (!el) el = document.getElementById(id);
         return el;
     }
@@ -1679,6 +1680,12 @@ async function fetchOceanFreightRate() {
             var tradeTermForMisc3 = document.getElementById('tradePref')?.value || '';
             fetchPortMiscFee(origin, tradeTermForMisc3, boxTypes);
         }
+    }
+
+    // 使用表单中选择的终到港（如有），否则回退到路线推荐的目的港
+    var selectedDestPort = (document.getElementById('destPort')?.value || '').trim();
+    if (selectedDestPort) {
+        destination = selectedDestPort;
     }
 
     // Step 2: 调用船公司比价接口
@@ -1942,7 +1949,7 @@ function syncOceanRealtimeDisplay() {
     ];
     idPairs.forEach(function(baseId) {
         var el1 = document.getElementById(baseId);
-        var el2 = document.getElementById('fp' + baseId);
+        var el2 = document.getElementById('fp' + baseId.charAt(0).toUpperCase() + baseId.slice(1));
         // 从有内容的拷贝到另一个
         if (el1 && el2) {
             if (el1.textContent && el1.textContent !== '—') {
@@ -1963,8 +1970,9 @@ function syncOceanRealtimeDisplay() {
     var feeEl1 = document.getElementById('oceanFee');
     var feeEl2 = document.getElementById('fpOceanFee');
     if (feeEl1 && feeEl2) {
-        if (feeEl1.value) feeEl2.value = feeEl1.value;
-        else if (feeEl2.value) feeEl1.value = feeEl2.value;
+        // 以结果面板（fp）为准，避免隐藏弹窗的旧默认值覆盖最新合约报价
+        if (feeEl2.value && feeEl2.value !== feeEl1.value) feeEl1.value = feeEl2.value;
+        else if (feeEl1.value && !feeEl2.value) feeEl2.value = feeEl1.value;
     }
 }
 
@@ -2330,6 +2338,10 @@ function renderFeePanel(data) {
         tempDiv.innerHTML = panelHtml;
         container.appendChild(tempDiv.firstChild);
     }
+
+    // 默认展开海运费区块，让船公司合约报价区直接可见
+    var oceanSection = document.querySelector('#feePanelInResults .fee-section.ocean');
+    if (oceanSection) oceanSection.classList.add('open');
 
     // 触发合约报价加载（使用结果面板中的元素ID前缀 fp）
     autoEnableICS2ForEurope();
