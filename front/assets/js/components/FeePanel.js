@@ -104,7 +104,7 @@ export default {
     },
     template: `
         <div id="feePanelInResults" class="fee-panel-in-results">
-          <h3 style="font-size:0.9rem;font-weight:700;color:var(--ink);margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem"><span>💰</span> 费用信息确认</h3>
+          <h3 style="font-size:0.9rem;font-weight:700;color:var(--accent);margin-bottom:0.6rem;display:flex;align-items:center;gap:0.4rem"><span>💰</span> 费用信息确认</h3>
 
           <div class="fee-confirmed-banner" v-if="store.feeConfirmed">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
