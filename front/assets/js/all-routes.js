@@ -106,4 +106,15 @@
         render();
     }
     init();
+
+function goBackHome() {
+    // 由首页按钮打开时：关闭当前页返回原页面；直接访问时回退到首页
+    if (window.opener && !window.opener.closed) {
+        try { window.opener.focus(); } catch (e) {}
+        window.close();
+    } else {
+        location.href = 'logistics-optimizer.html';
+    }
+}
+window.goBackHome = goBackHome;
 })();

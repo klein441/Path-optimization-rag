@@ -272,14 +272,6 @@ export default {
             </div>
           </div>
 
-          <!-- 全部路线价格对比入口 -->
-          <div class="all-routes-entry" v-if="routesCount > 0">
-            <button type="button" class="all-routes-btn" @click="openAllRoutes">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-              全部路线价格对比
-              <span class="count">{{ routesCount }} 条路线</span>
-            </button>
-          </div>
           <!-- 承运商和船公司 -->
           <div class="carrier-shipping-section" v-if="hasCarrierShipping">
             <div class="cs-grid">
@@ -394,6 +386,15 @@ export default {
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- 全部路线价格对比入口（页面最底部） -->
+          <div class="all-routes-entry" v-if="routesCount > 0">
+            <button type="button" class="all-routes-btn" @click="openAllRoutes">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+              全部路线价格对比
+              <span class="count">{{ routesCount }} 条路线</span>
+            </button>
           </div>
 
         </div>
