@@ -18,8 +18,8 @@ DATA_DIR = os.path.join(_ROOT_DIR, "data")
 FILES = {
     # 1. 各基地产能 — 工厂PVC/丁腈手套产能数据
     "factory_capacity": os.path.join(DATA_DIR, "各基地产能.xlsx"),
-    # 2. 物料行 — 物料名称/数量/重量/体积/发货车间/付款方式
-    "material_line": os.path.join(DATA_DIR, "物料行.xlsx"),
+    # 2. 各工厂最大订单数 — 工厂产能+产品类型数据（原物料行已清洗合并至此）
+    "material_line": os.path.join(DATA_DIR, "各工厂最大订单数.xlsx"),
 }
 
 # ===== LLM 配置 =====
@@ -35,8 +35,17 @@ PORT = int(os.environ.get("PORT", "5000"))
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 
 # ===== 汇率配置 =====
-USD_TO_CNY = float(os.environ.get("USD_TO_CNY", "7.2"))
+USD_TO_CNY = float(os.environ.get("USD_TO_CNY", "6.747"))
 CNY_TO_USD = 1.0 / USD_TO_CNY
+
+# ===== MySQL 配置 =====
+DB_ENABLED = os.environ.get("DB_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+DB_HOST = os.environ.get("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.environ.get("DB_PORT", "3306"))
+DB_USER = os.environ.get("DB_USER", "root")
+DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
+DB_NAME = os.environ.get("DB_NAME", "logistics_optimizer")
+DB_CHARSET = os.environ.get("DB_CHARSET", "utf8mb4")
 
 # ===== 产品类型映射 =====
 # 前端产品类型 -> 数据库物料类型关键词
@@ -69,7 +78,7 @@ FACTORY_SHORT = {
 
 # ===== 工厂所在地/区域映射 =====
 FACTORY_REGION = {
-    "安徽英科医疗用品有限公司": {"region": "国内", "province": "安徽", "default_port": "青岛/QINGDAO"},
+    "安徽英科医疗用品有限公司": {"region": "国内", "province": "安徽", "default_port": "上海/SHANGHAI"},
     "山东英科医疗制品有限公司": {"region": "国内", "province": "山东", "default_port": "青岛/QINGDAO"},
     "江西英科医疗有限公司": {"region": "国内", "province": "江西", "default_port": "上海/SHANGHAI"},
     "安庆英科医疗有限公司": {"region": "国内", "province": "安徽", "default_port": "上海/SHANGHAI"},
@@ -90,8 +99,8 @@ NORTH_AMERICA = ["美国", "加拿大", "墨西哥"]
 # ===== FDA要求国家 =====
 FDA_COUNTRIES = ["美国"]
 
-# ===== 合约海运费数据文件 =====
-CONTRACT_FREIGHT_FILE = os.path.join(DATA_DIR, "合约信息导出0806.xlsx")
+# ===== 合约海运费数据文件（原《合约信息导出0806》）=====
+CONTRACT_FREIGHT_FILE = os.path.join(DATA_DIR, "海运费参考标准.xlsx")
 # 合约海运费缓存刷新间隔（秒），默认 1 小时
 CONTRACT_FREIGHT_CACHE_TTL = 3600
 # 合约箱型列名映射（前端箱型 -> Excel 列名）
@@ -125,8 +134,8 @@ BOX_TYPE_VOLUME = {
 
 PORT_MISC_STANDARD_FILE = os.path.join(DATA_DIR, "港杂费标准_贸易条款承运商箱型港口.xlsx")
 
-# 各路线报价卡 — 用于陆运费推荐（按工厂+港口+运输方式匹配）
-ROUTE_PRICING_FILE = os.path.join(DATA_DIR, "各路线报价卡.xlsx")
+# 工厂到起运港拖车费（运输方式/承运商/发货工厂/始发港）— 用于陆运费推荐
+ROUTE_PRICING_FILE = os.path.join(DATA_DIR, "工厂到起运港拖车费_运输方式承运商发货工厂始发港.xlsx")
 
 # 运抵国与目的港映射表 — 用于前端运抵国/终到港下拉联动
 COUNTRY_DEST_PORT_FILE = os.path.join(DATA_DIR, "运抵国与目的港.xlsx")

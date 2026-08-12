@@ -34,7 +34,7 @@
   font-size:0.84rem;text-align:right;font-family:var(--font-mono);color:var(--ink);
   background:var(--surface);outline:none;transition:border-color .2s ease-out;
 }
-.fee-edit-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(184,134,11,0.12)}
+.fee-edit-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,0.14)}
 .fee-edit-unit{font-size:0.74rem;color:var(--muted);font-family:var(--font-mono)}
 .fee-edit-usd{font-size:0.7rem;color:var(--muted-light);white-space:nowrap}
 .fee-edit-divider{height:1px;background:var(--rule);margin:0.55rem 0}
@@ -59,13 +59,13 @@
 .fee-actions{display:flex;gap:0.6rem;margin-top:0.6rem;align-items:stretch}
 .confirm-fee-btn{
   flex:1;padding:0.75rem;font-size:0.88rem;font-weight:600;font-family:var(--font-body);
-  color:#fff;background:linear-gradient(135deg,#166534,#22c55e);
+  color:#fff;background:linear-gradient(135deg,#2563EB,#3B82F6);
   border:none;border-radius:var(--radius-md);cursor:pointer;
   display:flex;align-items:center;justify-content:center;gap:0.35rem;
   transition:transform .2s ease-out,box-shadow .2s ease-out;touch-action:manipulation;min-height:44px;
-  box-shadow:0 4px 14px rgba(34,197,94,0.25);
+  box-shadow:0 4px 14px rgba(37,99,235,0.28);
 }
-.confirm-fee-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(34,197,94,0.35)}
+.confirm-fee-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(37,99,235,0.38)}
 .confirm-fee-btn:active{transform:translateY(0)}
 .edit-fee-btn{
   flex:0 0 auto;padding:0.75rem 1rem;font-size:0.85rem;font-weight:600;font-family:var(--font-body);
@@ -79,12 +79,12 @@
 .fee-confirmed-banner{
   display:flex;align-items:center;gap:0.6rem;padding:0.7rem 0.9rem;margin-bottom:0.8rem;
   border-radius:var(--radius-md);
-  background:linear-gradient(135deg,rgba(34,197,94,0.14),rgba(22,101,52,0.08));
-  border:1px solid rgba(34,197,94,0.35);
+  background:linear-gradient(135deg,rgba(37,99,235,0.14),rgba(29,78,216,0.08));
+  border:1px solid rgba(37,99,235,0.35);
 }
-.fee-confirmed-banner svg{flex:0 0 auto;color:#16a34a}
-.fee-confirmed-title{font-size:0.82rem;font-weight:700;color:#166534}
-.fee-confirmed-total{font-size:1.05rem;font-weight:700;color:#166534;font-family:var(--font-display)}
+.fee-confirmed-banner svg{flex:0 0 auto;color:#2563EB}
+.fee-confirmed-title{font-size:0.82rem;font-weight:700;color:#1D4ED8}
+.fee-confirmed-total{font-size:1.05rem;font-weight:700;color:#1D4ED8;font-family:var(--font-display)}
 /* ===== 锁定状态 ===== */
 .fee-panel-in-results input:disabled,
 .fee-panel-in-results select:disabled{opacity:0.55;cursor:not-allowed;background:var(--surface-muted)}

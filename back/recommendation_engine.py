@@ -50,15 +50,14 @@ class RecommendationEngine:
         result = self.llm_client.recommend(input_data)
 
         # 添加引擎元信息
-        result["engine"] = "data_driven_v2"
+        result["engine"] = "data_driven_v3"
         result["data_sources"] = [
             "各基地产能",
-            "物料行",
-            "合约信息导出0806",
-            "港杂费标准_贸易条款承运商箱型港口",
-            "各路线报价卡",
-            "运抵国与目的港",
             "各工厂最大订单数",
+            "海运费参考标准",
+            "港杂费标准_贸易条款承运商箱型港口",
+            "工厂到起运港拖车费",
+            "运抵国与目的港",
         ]
         result["llm_enabled"] = LLM_ENABLED
 

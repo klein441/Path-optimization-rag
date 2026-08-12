@@ -3,6 +3,7 @@
  */
 import { store } from '../state.js';
 import { calculateAllFees } from '../fees.js';
+import { USD_TO_CNY } from '../constants.js';
 import FeePanel from './FeePanel.js';
 
 const TIMELINE_ICONS = {
@@ -55,7 +56,7 @@ export default {
             return calculateAllFees();
         },
         effectiveTotalUsd() {
-            return Math.round(this.effectiveTotalCny / 7.2);
+            return Math.round(this.effectiveTotalCny / USD_TO_CNY);
         },
         shippingLines() {
             const sl = this.primary.shippingLines || {};
@@ -68,7 +69,7 @@ export default {
         carrierTagStyle() {
             const type = (this.primary.carrier || {}).type;
             if (type === '自有') return 'background:rgba(22,163,74,0.1);color:var(--success,#16a34a)';
-            return 'background:rgba(184,134,11,0.1);color:var(--accent,#B8860B)';
+            return 'background:rgba(37,99,235,0.1);color:var(--accent,#2563EB)';
         },
         timelineSteps() {
             const p = this.primary;
@@ -126,6 +127,10 @@ export default {
                 localStorage.setItem('allRoutesData', JSON.stringify({
                     candidates: store.results.allCandidates || [],
                     primary: store.results.primary || {},
+                    selection: {
+                        factories: (store.results.data || {}).eligibleFactoryNames || [],
+                        ports: (store.results.data || {}).selectedOriginPorts || [],
+                    },
                 }));
             } catch (e) {
                 console.error('[全部路线] 数据保存失败:', e);
@@ -165,10 +170,10 @@ export default {
           <h3>正在生成最优路径方案</h3>
           <p>系统正在分析工厂产能、港口资源、运输成本和时效...</p>
           <div class="loading-steps">
-            <div class="loading-step active"><span class="ls-dot"></span><span>匹配可用工厂</span></div>
-            <div class="loading-step"><span class="ls-dot"></span><span>计算运输成本</span></div>
-            <div class="loading-step"><span class="ls-dot"></span><span>评估时效路线</span></div>
-            <div class="loading-step"><span class="ls-dot"></span><span>AI 智能推荐</span></div>
+            <div class="loading-step active"><span class="ls-dot"></span><span>匹配产能足够的工厂</span></div>
+            <div class="loading-step"><span class="ls-dot"></span><span>筛选海运费最便宜的5个始发港</span></div>
+            <div class="loading-step"><span class="ls-dot"></span><span>计算所有路线总费用</span></div>
+            <div class="loading-step"><span class="ls-dot"></span><span>生成最优推荐</span></div>
           </div>
         </div>
 
@@ -304,7 +309,7 @@ export default {
                 <div class="cs-card-body">
                   <div class="cs-primary">
                     <span class="cs-name">{{ primary.shippingLine.name }}</span>
-                    <span class="cs-tag" style="background:rgba(184,134,11,0.1);color:var(--accent,#B8860B)">{{ primary.shippingLine.code || '' }}</span>
+                    <span class="cs-tag" style="background:rgba(37,99,235,0.1);color:var(--accent,#2563EB)">{{ primary.shippingLine.code || '' }}</span>
                   </div>
                   <div class="cs-meta">
                     <span>航程 {{ primary.shippingLine.transit_days || '?' }} 天</span>

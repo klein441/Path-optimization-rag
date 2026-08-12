@@ -1,7 +1,7 @@
 """
 数据加载器 — 加载并预处理基础数据表
-基础数据源：各基地产能.xlsx、物料行.xlsx
-辅助数据：合约信息导出0806.xlsx、港杂费标准、各路线报价卡等（由 app.py 独立加载）
+基础数据源：各基地产能.xlsx、各工厂最大订单数.xlsx（原物料行已合并）
+辅助数据：海运费参考标准.xlsx、港杂费标准、工厂到起运港拖车费等（由 app.py 独立加载）
 """
 import pandas as pd
 import numpy as np
@@ -45,7 +45,7 @@ class DataLoader:
         print("[数据加载] 正在加载各基地产能...")
         self.factory_capacity = self._load_factory_capacity()
 
-        print("[数据加载] 正在加载物料行...")
+        print("[数据加载] 正在加载各工厂最大订单数...")
         self.material_line = self._load_material_line()
 
         print(f"[数据加载] 完成")
@@ -59,5 +59,5 @@ class DataLoader:
 
     def _load_material_line(self):
         df = _read_first_sheet(FILES["material_line"])
-        print(f"  物料行: {len(df)} 行")
+        print(f"  各工厂最大订单数: {len(df)} 行")
         return df

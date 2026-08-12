@@ -35,7 +35,7 @@ class KnowledgeBase:
 
     # ===== 工厂信息 =====
     def _build_factory_info(self):
-        """基于各基地产能表 + 物料行构建工厂信息"""
+        """基于各基地产能表 + 各工厂最大订单数构建工厂信息"""
         cap_df = self._loader.factory_capacity
         self.factory_capacity = {}
         for _, row in cap_df.iterrows():
@@ -73,7 +73,7 @@ class KnowledgeBase:
                 "total_capacity": cap["total_capacity"],
             }
 
-        # 基于物料行数据，统计各工厂实际生产的产品类型
+        # 基于各工厂最大订单数，统计各工厂实际生产的产品类型
         material_df = self._loader.material_line
         if '发货车间' in material_df.columns and '物料名称' in material_df.columns:
             factory_products = {}
@@ -117,15 +117,36 @@ class KnowledgeBase:
                 return factory
         return None
 
-    # ===== 港口与路线（基于配置默认值，无历史数据） =====
+    # ===== 港口与路线（基于拖车费数据动态推导 + 配置回退） =====
     def _build_port_routes(self):
-        """构建港口与路线映射（基于工厂配置的默认港口）"""
-        # 工厂 -> 始发港映射（基于配置的默认港口）
+        """构建港口与路线映射（优先从拖车费Excel数据推导，配置仅作回退）"""
+        import pandas as pd
+        import os
+
+        # 1. 先从工厂到起运港拖车费 Excel 推导每个工厂的实际始发港（按运输笔数排序）
         self.factory_ports = {}
+        try:
+            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data')
+            route_file = os.path.join(data_dir, '工厂到起运港拖车费_运输方式承运商发货工厂始发港.xlsx')
+            if os.path.exists(route_file):
+                df = pd.read_excel(route_file, sheet_name=0)
+                for factory in df['发货工厂'].unique():
+                    fdf = df[df['发货工厂'] == factory]
+                    port_stats = fdf.groupby('始发港')['运输笔数'].sum().sort_values(ascending=False)
+                    self.factory_ports[factory] = [
+                        {"port": port, "count": int(count)}
+                        for port, count in port_stats.items()
+                    ]
+                print(f"[知识库] 从拖车费数据推导 {len(self.factory_ports)} 个工厂的始发港")
+        except Exception as e:
+            print(f"[知识库] 拖车费数据加载失败，回退到配置: {e}")
+
+        # 2. 对数据中未覆盖的工厂，用 config FACTORY_REGION 的 default_port 补充
         for factory, info in self.factory_info.items():
-            default_port = info.get("default_port", "青岛/QINGDAO")
-            if default_port:
-                self.factory_ports[factory] = [{"port": default_port, "count": 0}]
+            if factory not in self.factory_ports or not self.factory_ports[factory]:
+                default_port = info.get("default_port", "青岛/QINGDAO")
+                if default_port:
+                    self.factory_ports[factory] = [{"port": default_port, "count": 0}]
 
         # 运抵国 -> 目的港映射（空，由 app.py 的 /api/dest-ports 接口实时查询 运抵国与目的港.xlsx）
         self.country_dest_ports = {}

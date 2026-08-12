@@ -3,26 +3,33 @@
  */
 import { TRANSPORT_MODE_FREIGHT } from './constants.js';
 import { store } from './state.js';
-import { getOriginPortByProvince } from './utils.js';
+import { getOriginPortByProvince, isFTradeTerm } from './utils.js';
 import { apiEstimateToll, fetchLandFreightFromRoute } from './api.js';
 
 export function getSeaManagerTotal() {
     const sm = store.feeData.seaManager;
-    return sm.manifestFee + sm.vgmFee + sm.ics2Fee;
+    const totalBoxes = parseInt(store.form.boxes) || 1;
+    return sm.manifestFee * totalBoxes + sm.vgmFee * totalBoxes + sm.ics2Fee;
 }
 
 export function getOtherTotal() {
     return store.feeData.other.reduce((sum, o) => sum + (parseFloat(o.amount) || 0), 0);
 }
 
+export function getFixedTotal() {
+    return store.feeData.fixed.reduce((sum, o) => sum + (parseFloat(o.amount) || 0), 0);
+}
+
 export function calculateAllFees() {
     const fd = store.feeData;
     const landTotal = fd.land.baseFreight + fd.land.tollFee + fd.land.insideLoadFee;
-    return landTotal + getSeaManagerTotal() + fd.portMisc.fee + fd.ocean.fee + getOtherTotal();
+    const term = (store.results.primary && store.results.primary.tradeTerm) || store.form.tradePref || '';
+    const oceanFee = isFTradeTerm(term) ? 0 : fd.ocean.fee;
+    return landTotal + getSeaManagerTotal() + fd.portMisc.fee + oceanFee + getOtherTotal() + getFixedTotal();
 }
 
 // ===== 陆运费初始化（根据工厂省份和运输方式自动推荐）=====
-// factoryName 和 originPort 可选：传入时从各路线报价卡实时查询陆运费
+// factoryName 和 originPort 可选：传入时从工厂到起运港拖车费表实时查询陆运费
 export function initLandFees(province, mode, factoryName, originPort) {
     const fd = store.feeData;
     fd.land.factoryProvince = province || '';
@@ -32,7 +39,9 @@ export function initLandFees(province, mode, factoryName, originPort) {
     const conf = TRANSPORT_MODE_FREIGHT[mode];
     if (!conf) return;
     fd.land.transportMode = mode;
-    fd.land.baseFreight = conf.baseFreight;
+    var totalBoxes = parseInt(store.form.boxes) || 1;
+    fd.land.baseFreight = Math.round(conf.baseFreight * totalBoxes * 100) / 100;
+    fd.land.perBoxFee = conf.baseFreight;
     if (factoryName && originPort) {
         fetchLandFreightFromRoute(factoryName, originPort, mode);
     }
@@ -105,8 +114,21 @@ export function applyTollFee(amount) {
 export function applyResultToFeeData(data) {
     var primary = data.primary;
     if (!primary || !primary.cost || !primary.cost.items) return;
-    var items = primary.cost.items;
     const fd = store.feeData;
+
+    // 费用面板的工厂/港口必须和推荐结果保持一致
+    fd.fixed = [];
+    fd.land.factoryName = primary.factory || fd.land.factoryName;
+    fd.land.originPort = primary.departurePort || fd.land.originPort;
+    if (primary.factoryInfo && primary.factoryInfo.province) {
+        fd.land.factoryProvince = primary.factoryInfo.province;
+    }
+    store.routeInfoCard.factory = primary.factoryShort || primary.factory || store.routeInfoCard.factory;
+    store.routeInfoCard.origin = primary.departurePort || store.routeInfoCard.origin;
+    store.routeInfoCard.dest = primary.destPort || store.routeInfoCard.dest;
+    store.ocean.factoryTagText = (primary.factoryShort || primary.factory || '') + ' · ' + (primary.departurePort || '');
+
+    var items = primary.cost.items;
     var oceanModified = false; // 海运费是否来自用户手动修改（重新优化时保留用户确认值）
     for (var i = 0; i < items.length; i++) {
         var item = items[i];
@@ -114,34 +136,30 @@ export function applyResultToFeeData(data) {
         var cat = item.category || '';
         if ((item.name && item.name.indexOf('港杂费') !== -1) || cat.indexOf('港杂费') !== -1) {
             fd.portMisc.fee = amount;
+            var boxCountForFee = primary.cost.box_count || 1;
+            fd.portMisc.perBoxFee = Math.round(amount / boxCountForFee * 100) / 100;
         } else if ((item.name && item.name.indexOf('陆运费') !== -1) || cat.indexOf('拖车费') !== -1) {
             fd.land.baseFreight = amount;
+            var landBoxCount = primary.cost.box_count || 1;
+            fd.land.perBoxFee = Math.round(amount / landBoxCount * 100) / 100;
         } else if (item.name && item.name.indexOf('VGM') !== -1) {
-            fd.seaManager.vgmFee = amount;
+            var vgmBoxes = primary.cost.box_count || 1;
+            fd.seaManager.vgmFee = Math.round(amount / vgmBoxes * 100) / 100;
         } else if (item.name && item.name.indexOf('舱单') !== -1) {
-            fd.seaManager.manifestFee = amount;
+            var manifestBoxes = primary.cost.box_count || 1;
+            fd.seaManager.manifestFee = Math.round(amount / manifestBoxes * 100) / 100;
             fd.seaManager.manifestMode = 'custom';
-            fd.seaManager.manifestCustom = amount;
+            fd.seaManager.manifestCustom = fd.seaManager.manifestFee;
         } else if (item.name && item.name.indexOf('ICS2') !== -1) {
             fd.seaManager.ics2Enabled = true;
             fd.seaManager.ics2Fee = amount;
         } else if (item.name && item.name.indexOf('报关') !== -1) {
-            fd.other = fd.other || [];
-            var found = false;
-            for (var j = 0; j < fd.other.length; j++) {
-                if (fd.other[j].name === '报关费') { fd.other[j].amount = amount; found = true; break; }
-            }
-            if (!found) fd.other.push({ name: '报关费', amount: amount });
+            fd.fixed.push({ name: '报关费', amount: amount });
         } else if (item.name && item.name.indexOf('海运费') !== -1) {
             fd.ocean.fee = amount;
             if (item.modified_by_user) oceanModified = true;
         } else if (item.name && item.name.indexOf('保险') !== -1) {
-            fd.other = fd.other || [];
-            var found2 = false;
-            for (var k = 0; k < fd.other.length; k++) {
-                if (fd.other[k].name === '保险费') { fd.other[k].amount = amount; found2 = true; break; }
-            }
-            if (!found2) fd.other.push({ name: '保险费', amount: amount });
+            fd.fixed.push({ name: '保险费', amount: amount });
         }
     }
     // 如果有合约海运费信息，更新 ocean fee（仅在合约费率有效时覆盖）
@@ -156,5 +174,8 @@ export function applyResultToFeeData(data) {
         fd.ocean.source = oceanInfo.is_valid ? 'contract_valid' : 'contract_expired';
     }
     fd._fromRecommendation = true;
+    if (!store.feeConfirmed) {
+        fetchLandFreightFromRoute(primary.factory, primary.departurePort, fd.land.transportMode || 'direct');
+    }
     console.log('[FeeData] 已从推荐结果更新:', fd);
 }

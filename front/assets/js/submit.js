@@ -24,11 +24,13 @@ function buildPayload() {
         destCountry: form.destCountry,
         destPort: form.destPort,
         gloveQty: parseInt(form.gloveQty) || 0,
+        gloveUnit: form.gloveUnit || '千支',
         boxCount: totalBoxes,
         weight: totalWeight,
         volume: parseFloat(form.volume) || 0,
         cargoReady: form.cargoReady,
-        shipSchedule: form.shipSchedule,
+        requiredArrival: form.requiredArrival || '',
+        urgent: Boolean(form.urgent),
         transportPref: form.transportPref,
         tradePref: form.tradePref,
         remarks: form.remarks,
@@ -41,6 +43,9 @@ function buildPayload() {
 
 function applySuccess(result, payload) {
     applyResultToFeeData(result.data);
+    if (result.data && result.data.cannotMeetArrival) {
+        alert(result.data.riskWarning || '所有方案均无法按客户约定时间到货，请调整到货时间或选择更早船期。');
+    }
     store.results.status = 'success';
     store.results.data = result.data;
     store.results.primary = result.data.primary;
@@ -71,8 +76,8 @@ export async function handleSubmit() {
         alert('请选择或填写终到港');
         return;
     }
-    if (!form.cargoReady || !form.shipSchedule) {
-        alert('请填写日期信息');
+    if (!form.cargoReady) {
+        alert('请填写预计货好时间');
         return;
     }
 

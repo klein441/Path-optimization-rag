@@ -1,0 +1,180 @@
+/* 登录页样式 — 全部作用域限定在 #login-overlay 内，不影响主应用 */
+#login-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: url(../img/4.jpg) no-repeat center center;
+    background-size: cover;
+    font-family: "微软雅黑", "Microsoft YaHei", sans-serif;
+}
+
+#login-overlay *,
+#login-overlay *::before,
+#login-overlay *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 16px;
+    color: #666;
+    font-family: inherit;
+}
+
+#login-overlay .bg {
+    width: 415px;
+    height: 337px;
+    background: #fff;
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    margin: auto;
+    z-index: 1;
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.4);
+    border-radius: 15px;
+}
+
+#login-overlay .password {
+    position: absolute;
+    top: 9.5rem;
+    right: 3.5rem;
+    display: flex;
+}
+
+#login-overlay .btn {
+    position: absolute;
+    top: 16rem;
+    right: 3.5rem;
+    border: none;
+    color: #fff;
+    width: 18.825rem;
+    height: 2.5625rem;
+    text-align: center;
+    background-color: #2D456B;
+    text-indent: 0;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+#login-overlay .img {
+    width: 100%;
+    position: absolute;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    z-index: -1;
+}
+
+#login-overlay .wel {
+    width: 415px;
+    height: 35px;
+    color: #2d456b;
+    font-size: 1.5rem;
+    position: absolute;
+    top: 2rem;
+    text-align: center;
+}
+
+#login-overlay input[type="text"],
+#login-overlay input[type="password"] {
+    border-bottom: 1px solid #2D456B;
+    height: 2.5625rem;
+    width: 15.8125rem;
+    text-indent: 3.125rem;
+    outline: none;
+    background: transparent;
+}
+
+#login-overlay .user {
+    position: absolute;
+    top: 6rem;
+    right: 3.5rem;
+    display: flex;
+}
+
+#login-overlay .rem {
+    position: absolute;
+    top: 13.25rem;
+    right: auto;
+    left: 66px;
+    border: none;
+    color: #323333;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 1rem;
+}
+
+#login-overlay .rem input[type="checkbox"] {
+    width: 0.8125rem;
+    height: 0.8125rem;
+    margin: 0;
+    border: 1px solid #2D456B;
+}
+
+#login-overlay .fg {
+    position: absolute;
+    top: 13.25rem;
+    right: 3.5rem;
+    border: none;
+    color: #323333;
+    display: flex;
+    align-items: center;
+    height: 1rem;
+}
+
+#login-overlay .fg a {
+    font-size: 11px;
+    color: #666;
+    text-decoration: none;
+    line-height: 1;
+    display: block;
+}
+
+#login-overlay #yonghu {
+    border-bottom: 1px solid #2D456B;
+    height: 41px;
+    line-height: 41px;
+}
+
+#login-overlay #reb {
+    margin: 0;
+    font-size: 11px;
+}
+
+/* ===== 响应式 ===== */
+@media (min-width: 800px) and (max-width: 1200px) {
+    #login-overlay .bg {
+        width: 355px;
+        height: 300px;
+    }
+    #login-overlay .wel {
+        width: 355px;
+    }
+    #login-overlay .user {
+        top: 5rem;
+        right: 3.5rem;
+    }
+    #login-overlay .password {
+        top: 8rem;
+        right: 3.5rem;
+    }
+    #login-overlay input[type="text"],
+    #login-overlay input[type="password"] {
+        width: 12rem;
+    }
+    #login-overlay .rem {
+        top: 11.75rem;
+        right: auto;
+        left: 66px;
+    }
+    #login-overlay .fg {
+        top: 11.75rem;
+        right: 3.5rem;
+    }
+    #login-overlay .btn {
+        top: 14rem;
+        width: 15rem;
+    }
+}

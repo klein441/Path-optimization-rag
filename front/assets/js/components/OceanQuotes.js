@@ -45,6 +45,8 @@ export default {
                     <span class="valid-badge" :class="c.isValid ? 'ok' : 'expired'">{{ c.isValid ? '有效' : '过期' }}</span>
                     <span class="meta-sep">·</span>
                     <span class="meta-full">✓ 全箱型</span>
+                    <span class="meta-sep" v-if="c.effectiveTo">·</span>
+                    <span v-if="c.effectiveTo">失效 {{ c.effectiveTo }}</span>
                 </div>
                 <div class="ocean-quote-boxes">
                     <div v-for="bt in boxTypeKeys" :key="bt" class="ocean-quote-box-line">
@@ -53,6 +55,9 @@ export default {
                             <span class="box-rate">{{ rateDisplay(c.perTypeDetail[bt]) }}</span> ×
                             <span class="box-qty">{{ c.perTypeDetail[bt].qty }}</span> =
                             <span class="box-subtotal">{{ subtotalUsd(c.perTypeDetail[bt]) }}</span>
+                            <span class="valid-badge" :class="c.perTypeDetail[bt].isValid ? 'ok' : 'expired'">{{ c.perTypeDetail[bt].isValid ? '有效' : '过期' }}</span>
+                            <span v-if="c.perTypeDetail[bt].effectiveTo" class="meta-sep">·</span>
+                            <span v-if="c.perTypeDetail[bt].effectiveTo">失效 {{ c.perTypeDetail[bt].effectiveTo }}</span>
                         </template>
                     </div>
                 </div>

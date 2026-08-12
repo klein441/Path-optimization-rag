@@ -258,7 +258,10 @@ export default {
               <label class="form-label">手套数量 <span class="req">*</span></label>
               <div class="input-prefix">
                 <input type="number" class="form-input" id="gloveQty" min="1" step="1" style="padding-right:3rem" v-model.number="store.form.gloveQty">
-                <span class="unit">千支</span>
+                <select class="unit-select" v-model="store.form.gloveUnit">
+                  <option value="千支">千支</option>
+                  <option value="八百支">八百支</option>
+                </select>
               </div>
             </div>
 
@@ -311,8 +314,8 @@ export default {
             </div>
 
             <div class="form-group">
-              <label class="form-label">期望船期 <span class="req">*</span></label>
-              <input type="date" class="form-input" id="shipSchedule" v-model="store.form.shipSchedule">
+              <label class="form-label">客户要求到货时间</label>
+              <input type="date" class="form-input" id="requiredArrival" v-model="store.form.requiredArrival">
             </div>
 
             <div class="form-divider"></div>
@@ -327,8 +330,9 @@ export default {
                   <div class="form-group">
                     <label class="form-label">贸易条款偏好</label>
                     <select class="form-select" id="tradePref" v-model="store.form.tradePref">
-                      <option value="auto">智能推荐</option>
                       <option value="FOB">FOB (F条款)</option>
+                      <option value="FCA">FCA (F条款)</option>
+                      <option value="FAS">FAS (F条款)</option>
                       <option value="CIF">CIF (C条款)</option>
                       <option value="DDP">DDP (D条款)</option>
                     </select>
@@ -341,6 +345,12 @@ export default {
                       <option value="time">时效优先</option>
                       <option value="stable">稳定性优先</option>
                     </select>
+                  </div>
+                  <div class="form-group full">
+                    <label class="form-label" style="display:flex;align-items:center;gap:0.4rem;text-transform:none;letter-spacing:0">
+                      <input type="checkbox" v-model="store.form.urgent" style="accent-color:var(--accent);width:15px;height:15px">
+                      加急（优先保证到货时效）
+                    </label>
                   </div>
                   <div class="form-group full">
                     <label class="form-label">备注 / 特殊要求</label>

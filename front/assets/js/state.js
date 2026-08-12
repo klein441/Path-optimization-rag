@@ -15,10 +15,12 @@ export const store = reactive({
         destCountry: '',
         destPort: '',
         gloveQty: 1000,
+        gloveUnit: '千支',
         weightPerBox: 15,
         cargoReady: '',
-        shipSchedule: '',
-        tradePref: 'auto',
+        requiredArrival: '',
+        urgent: false,
+        tradePref: 'FOB',
         transportPref: 'auto',
         remarks: '',
         // 派生值（由 OrderForm watcher 同步）
@@ -44,12 +46,33 @@ export const store = reactive({
     feeData: {
         land: {
             transportMode: 'direct', baseFreight: 500, tollEnabled: false, tollFee: 0,
-            insideLoadEnabled: false, insideLoadFee: 0, factoryProvince: '', factoryName: '', originPort: ''
+            insideLoadEnabled: false, insideLoadFee: 0, factoryProvince: '', factoryName: '', originPort: '',
+            // 承运商推荐
+            bestCarrier: '',        // 推荐承运商名称（最便宜）
+            selectedCarrier: null,  // 用户选择的承运商对象
+            carriers: [],           // 全部匹配的承运商列表
+            perBoxFee: 0,           // 推荐承运商的单箱费率
+            source: '',             // 数据来源
+            totalMatched: 0,        // 匹配记录数
+            loading: false,
+            error: false,
         },
-        seaManager: { manifestFee: 55, manifestCustom: 0, manifestMode: 'default', vgmFee: 5, ics2Enabled: false, ics2Fee: 0 },
-        portMisc: { fee: 320 },
+        seaManager: { manifestFee: 55, manifestCustom: 0, manifestMode: '55', vgmFee: 5, ics2Enabled: false, ics2Fee: 0 },
+        portMisc: {
+            fee: 320,               // 总费用（单箱费率 × 箱数）
+            perBoxFee: 0,           // 推荐承运商的单箱费率
+            bestCarrier: '',        // 推荐承运商名称（最便宜）
+            selectedCarrier: null,  // 用户选择的承运商对象
+            carriers: [],           // 全部匹配的承运商列表
+            source: '',             // 数据来源文件名
+            totalMatched: 0,        // 匹配到的标准记录数
+            usedLevel: '',          // 使用的数据等级（标准/参考）
+            loading: false,         // 加载状态
+            error: false,           // 查询失败标志
+        },
         ocean: { fee: 2500, selectedCarrier: null, allCarriers: [], cheapestCarrier: null, contractRate: null, contractCarrier: '', source: '' },
         other: [],   // [{name, amount}]
+        fixed: [],   // 后端返回的报关/保险等固定费用，不放进“其他费用”
         _fromRecommendation: false,
     },
 

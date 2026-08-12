@@ -32,12 +32,14 @@ Path optimization/
 │           └── components/    # Vue 组件（表单/结果/费用面板/弹窗等）
 ├── data/                       # 数据文件（Excel）
 │   ├── 各基地产能.xlsx
-│   ├── 海运费收入.xlsx
-│   ├── 费用.xlsx
-│   ├── 集装箱运单.xlsx
-│   ├── 物料行.xlsx
-│   ├── 提单运单.xlsx
-│   └── TMS费用类型.xlsx
+│   ├── 各工厂最大订单数.xlsx        （原物料行已清洗合并至此）
+│   ├── 海运费参考标准.xlsx          （原合约信息导出0806）
+│   ├── 工厂到起运港拖车费_运输方式承运商发货工厂始发港.xlsx  （原各路线报价卡）
+│   ├── 工厂到起运港时效分析表.xlsx
+│   ├── 工厂分配区间规则.xlsx
+│   ├── 港杂费标准_贸易条款承运商箱型港口.xlsx
+│   ├── 运抵国与目的港.xlsx
+│   └── 集装箱标准容积对照表.xlsx
 └── requirements.txt            # 依赖清单
 ```
 
@@ -72,6 +74,22 @@ $env:LLM_API_KEY = "your-api-key-here"
 python back\app.py
 ```
 
+### 4. 连接 MySQL（可选）
+
+后端会把每次推荐的输入和输出结果写入 MySQL，未配置时不影响正常推荐。
+
+```powershell
+$env:DB_ENABLED = "true"
+$env:DB_HOST = "127.0.0.1"
+$env:DB_PORT = "3306"
+$env:DB_USER = "root"
+$env:DB_PASSWORD = "your-password"
+$env:DB_NAME = "logistics_optimizer"
+python back\app.py
+```
+
+首次启动会自动创建表 `logistics_recommendation_log`，字段包含输入 JSON、输出 JSON、推荐工厂、始发港、终到港、贸易条款、总费用、时效和评分。
+
 ## API 接口
 
 | 方法 | 路径 | 说明 |
@@ -105,5 +123,6 @@ python back\app.py
 - **后端**: Flask + Pandas + NumPy
 - **前端**: Vue 3（本地 ES Modules，无构建工具）+ 模块化 JS / 拆分 CSS
 - **LLM**: 可选，支持任何兼容 OpenAI API 的模型
-- **数据源**: 7 张 Excel 表格（提单运单、物料行、集装箱运单、费用明细、海运费收入、各基地产能、TMS费用类型）
+- **数据源**: 本地 Excel 数据表（各工厂最大订单数、海运费参考标准、工厂到起运港拖车费、港杂费标准、运抵国与目的港等）
+- **选线逻辑**: 按手套数量过滤产能足够的工厂；从 11 个国内始发港中按合约海运费选出最便宜的 5 条始发港—终到港路线；再枚举工厂×始发港组合计算全费用
 - **核心引擎**: 规则引擎（始终可用）+ LLM 增强（有API Key时）

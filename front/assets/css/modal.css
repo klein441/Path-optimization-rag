@@ -32,7 +32,7 @@
 .route-info-banner{
   display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;
   background:var(--accent-muted);
-  border:1px solid rgba(184,134,11,0.2);border-radius:var(--radius-md);
+  border:1px solid rgba(37,99,235,0.22);border-radius:var(--radius-md);
   padding:0.9rem 1.1rem;margin-bottom:1.4rem;
 }
 .rib-item{display:flex;flex-direction:column;gap:0.15rem;min-width:5rem;flex:1}
@@ -45,7 +45,7 @@
 .route-info-card{
   display:flex;gap:0.8rem;padding:0.9rem 1.1rem;margin-bottom:1.2rem;
   background:var(--accent-muted);
-  border:1px solid rgba(184,134,11,0.15);border-radius:var(--radius-md);
+  border:1px solid rgba(37,99,235,0.16);border-radius:var(--radius-md);
 }
 .route-info-item{flex:1;display:flex;flex-direction:column;gap:0.2rem}
 .route-info-item-label{font-family:var(--font-mono);font-size:0.64rem;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.1em}
@@ -90,7 +90,7 @@
   border:1px solid var(--rule-strong);border-radius:var(--radius-sm);text-align:right;
   color:var(--ink);background:var(--surface);outline:none;transition:border-color .2s ease-out,box-shadow .2s ease-out;
 }
-.fee-item-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(184,134,11,0.12)}
+.fee-item-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,0.14)}
 .fee-item-input.small{width:90px}
 .fee-item-unit{font-size:0.74rem;color:var(--muted);font-family:var(--font-mono)}
 
@@ -140,7 +140,7 @@
 .fee-total-row{
   display:flex;align-items:center;gap:0.8rem;padding:0.9rem 1.2rem;
   background:var(--accent-muted);
-  border:1px solid rgba(184,134,11,0.15);border-radius:var(--radius-md);
+  border:1px solid rgba(37,99,235,0.16);border-radius:var(--radius-md);
   margin-top:1rem;
 }
 .fee-total-label{font-family:var(--font-display);font-size:0.92rem;font-weight:600;color:var(--ink)}
@@ -160,10 +160,10 @@
 .fee-summary-bar{
   display:flex;align-items:center;gap:0.6rem;padding:0.9rem 1.1rem;
   background:var(--accent-muted);
-  border:1px solid rgba(184,134,11,0.2);border-radius:var(--radius-md);
+  border:1px solid rgba(37,99,235,0.22);border-radius:var(--radius-md);
   margin-bottom:1.2rem;cursor:pointer;transition:border-color .2s ease-out;
 }
-.fee-summary-bar:hover{border-color:rgba(184,134,11,0.35)}
+.fee-summary-bar:hover{border-color:rgba(37,99,235,0.38)}
 .fee-summary-bar svg{width:18px;height:18px;color:var(--accent);flex-shrink:0}
 .fee-summary-bar span{font-size:0.84rem;color:var(--ink);line-height:1.6}
 .fee-summary-bar b{color:var(--accent);font-weight:600;font-family:var(--font-display)}

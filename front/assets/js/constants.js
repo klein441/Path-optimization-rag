@@ -5,6 +5,9 @@
 // ===== API 配置 =====
 export const API_BASE = 'http://localhost:5000';
 
+// ===== 汇率配置 =====
+export const USD_TO_CNY = 6.747;
+
 // ===== 运输方式推荐陆运费 =====
 export const TRANSPORT_MODE_FREIGHT = {
     direct:     { label: '直拖',     baseFreight: 500, hasToll: false },

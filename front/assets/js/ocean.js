@@ -6,7 +6,7 @@
 import { store } from './state.js';
 import { apiRouteInfo, apiFreightRateCompare, fetchPortMiscFee } from './api.js';
 import { initLandFees } from './fees.js';
-import { getFallbackFactory, getOceanPortsByCountry } from './utils.js';
+import { getFallbackFactory, getOceanPortsByCountry, showNotification, isFTradeTerm } from './utils.js';
 
 export function updateRouteInfoCard(factory, originPort, destPort) {
     store.routeInfoCard.factory = factory || '—';
@@ -18,6 +18,10 @@ export function updateRouteInfoCard(factory, originPort, destPort) {
 export function selectOceanCarrier(carrier) {
     if (!carrier) return;
     if (store.feeConfirmed) return; // 费用已确认，不允许再切换船公司
+    if (carrier.isValid === false) {
+        showNotification('该船公司合约已过期，不能选择');
+        return;
+    }
     store.feeData.ocean.fee = carrier.totalCny;
     store.feeData.ocean.selectedCarrier = carrier;
     store.feeData.ocean.allCarriers = store.ocean.carriers;
@@ -25,7 +29,45 @@ export function selectOceanCarrier(carrier) {
     console.log('[海运费] 用户选择船公司:', carrier.carrier, '¥' + carrier.totalCny);
 }
 
+// 选择港杂费承运商：切换后重新计算总费用
+export function selectPortMiscCarrier(carrier) {
+    if (!carrier) return;
+    if (store.feeConfirmed) return;
+    var totalBoxes = parseInt(store.form.boxes) || 1;
+    var perBoxFee = carrier.recommendedFee || 0;
+    var fee = Math.round(perBoxFee * totalBoxes * 100) / 100;
+    store.feeData.portMisc.fee = fee;
+    store.feeData.portMisc.perBoxFee = perBoxFee;
+    store.feeData.portMisc.selectedCarrier = carrier;
+    console.log('[港杂费] 用户选择承运商:', carrier.carrier,
+        '单箱¥' + perBoxFee + ' × ' + totalBoxes + '箱 = ¥' + fee);
+}
+
+// 选择陆运费承运商：切换后更新陆运费和高速费
+export function selectLandCarrier(carrier) {
+    if (!carrier) return;
+    if (store.feeConfirmed) return;
+    var landFee = carrier.landFreightMedian || 0;
+    var tollFee = carrier.tollFreightMedian || 0;
+    var totalBoxes = parseInt(store.form.boxes) || 1;
+    store.feeData.land.baseFreight = Math.round(landFee * totalBoxes * 100) / 100;
+    store.feeData.land.perBoxFee = landFee;
+    if (store.feeData.land.tollEnabled && tollFee > 0) {
+        store.feeData.land.tollFee = tollFee;
+    }
+    store.feeData.land.selectedCarrier = carrier;
+    console.log('[陆运费] 用户选择承运商:', carrier.carrier,
+        '单箱¥' + landFee + ' × ' + totalBoxes + '箱 = ¥' + store.feeData.land.baseFreight,
+        '高速费¥' + tollFee);
+}
+
 export async function fetchOceanFreightRate() {
+    const activeTerm = (store.results.primary && store.results.primary.tradeTerm) || store.form.tradePref || '';
+    if (isFTradeTerm(activeTerm)) {
+        store.ocean.loading = false;
+        store.ocean.realtime = false;
+        return;
+    }
     store.ocean.loading = true;
     store.ocean.realtime = false;
     store.ocean.error = false;
@@ -37,7 +79,6 @@ export async function fetchOceanFreightRate() {
     const boxTypes = form.boxTypes.slice();
     if (boxTypes.length === 0) boxTypes.push('40HQ');
     const cargoReady = form.cargoReady || '';
-    const shipSchedule = form.shipSchedule || '';
 
     let routeInfo = null;
     let origin, destination;
@@ -48,7 +89,6 @@ export async function fetchOceanFreightRate() {
             productType: productType,
             destCountry: destCountry,
             cargoReady: cargoReady,
-            shipSchedule: shipSchedule,
             boxType: boxTypes[0],
         };
         const routeResult = await apiRouteInfo(params);
@@ -61,41 +101,60 @@ export async function fetchOceanFreightRate() {
                 routeInfo.factoryShort, '→', origin, '→', destination,
                 '| 推荐航司:', routeInfo.recommendedShippingLine?.name || '无');
 
-            // 自动推荐陆运费（根据工厂省份+路线报价卡）
-            if (!store.feeData._fromRecommendation) {
-                initLandFees(routeInfo.factoryProvince, 'direct',
-                             routeInfo.factory || '', routeInfo.originPort || '');
+            // 已有推荐结果时，费用面板必须沿用推荐主路线，而不是航线查询的默认工厂
+            const primary = store.results.primary || null;
+            if (primary && primary.departurePort) {
+                origin = primary.departurePort;
+                destination = primary.destPort || destination;
             }
+            const feeFactory = (primary && primary.factory) || routeInfo.factory || '';
+            const feeFactoryShort = (primary && primary.factoryShort) || routeInfo.factoryShort || '';
+            const feeProvince = (primary && primary.factoryInfo && primary.factoryInfo.province) || routeInfo.factoryProvince || '';
+
+            // 自动推荐陆运费（根据推荐主路线的工厂+始发港+运输方式查询拖车费表）
+            initLandFees(feeProvince, 'direct', feeFactory, origin);
 
             // 自动推荐港杂费（根据始发港+贸易条款+箱型查询标准表）
-            if (!store.feeData._fromRecommendation) {
-                fetchPortMiscFee(origin, form.tradePref || '', boxTypes);
-            }
+            fetchPortMiscFee(origin, form.tradePref || '', boxTypes);
 
-            updateRouteInfoCard(routeInfo.factoryShort || routeInfo.factory || '',
-                                routeInfo.originPort || '',
-                                routeInfo.destPort || '');
+            updateRouteInfoCard(feeFactoryShort || feeFactory, origin, destination);
         } else {
             console.warn('[海运费] 路线查询失败，回退到默认映射:', routeResult.error);
+            const primary = store.results.primary || null;
+            if (primary && primary.departurePort) {
+                origin = primary.departurePort;
+                destination = primary.destPort || destination;
+                const feeFactory = primary.factory || '';
+                const feeProvince = (primary.factoryInfo && primary.factoryInfo.province) || '';
+                initLandFees(feeProvince, 'direct', feeFactory, origin);
+                updateRouteInfoCard(primary.factoryShort || feeFactory, origin, destination);
+            } else {
+                const fallback = getOceanPortsByCountry(destCountry);
+                origin = fallback.origin;
+                destination = fallback.destination;
+                const factoryInfo = getFallbackFactory(origin);
+                updateRouteInfoCard(factoryInfo.factoryShort, origin, destination);
+            }
+            fetchPortMiscFee(origin, form.tradePref || '', boxTypes);
+        }
+    } catch (e) {
+        console.warn('[海运费] 路线查询异常，回退到默认映射:', e.message);
+        const primary = store.results.primary || null;
+        if (primary && primary.departurePort) {
+            origin = primary.departurePort;
+            destination = primary.destPort || destination;
+            const feeFactory = primary.factory || '';
+            const feeProvince = (primary.factoryInfo && primary.factoryInfo.province) || '';
+            initLandFees(feeProvince, 'direct', feeFactory, origin);
+            updateRouteInfoCard(primary.factoryShort || feeFactory, origin, destination);
+        } else {
             const fallback = getOceanPortsByCountry(destCountry);
             origin = fallback.origin;
             destination = fallback.destination;
             const factoryInfo = getFallbackFactory(origin);
             updateRouteInfoCard(factoryInfo.factoryShort, origin, destination);
-            if (!store.feeData._fromRecommendation) {
-                fetchPortMiscFee(origin, form.tradePref || '', boxTypes);
-            }
         }
-    } catch (e) {
-        console.warn('[海运费] 路线查询异常，回退到默认映射:', e.message);
-        const fallback = getOceanPortsByCountry(destCountry);
-        origin = fallback.origin;
-        destination = fallback.destination;
-        const factoryInfo = getFallbackFactory(origin);
-        updateRouteInfoCard(factoryInfo.factoryShort, origin, destination);
-        if (!store.feeData._fromRecommendation) {
-            fetchPortMiscFee(origin, form.tradePref || '', boxTypes);
-        }
+        fetchPortMiscFee(origin, form.tradePref || '', boxTypes);
     }
 
     // 使用表单中选择的终到港（如有），否则回退到路线推荐的目的港
@@ -116,7 +175,13 @@ export async function fetchOceanFreightRate() {
             // 过滤：只保留对所有选定箱型都有报价的船公司
             const allCarriers = (d.carriers || []).filter(function(c) { return c.hasAllTypes; });
             const carriers = allCarriers;
-            const realCheapest = carriers.length > 0 ? carriers[0] : null;
+            var realCheapest = null;
+            for (var i = 0; i < carriers.length; i++) {
+                if (carriers[i].isValid !== false) {
+                    realCheapest = carriers[i];
+                    break;
+                }
+            }
 
             // 价格摘要（USD总价）
             store.ocean.medianRateText = realCheapest ? '$' + Number(realCheapest.totalUsd).toLocaleString() : '—';
@@ -146,7 +211,7 @@ export async function fetchOceanFreightRate() {
             }
             // 工厂标签
             if (routeInfo) {
-                store.ocean.factoryTagText = routeInfo.factoryShort + ' · ' + origin;
+                store.ocean.factoryTagText = (store.routeInfoCard.factory || '') + ' · ' + origin;
             }
 
             store.ocean.carriers = carriers;

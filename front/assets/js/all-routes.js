@@ -11,6 +11,7 @@
     }
     var candidates = (data && Array.isArray(data.candidates)) ? data.candidates : [];
     var primary = (data && data.primary) || {};
+    var selection = (data && data.selection) || {};
 
     function isPrimaryRoute(c) {
         return (c.factoryShort || c.factory || '') === (primary.factoryShort || primary.factory || '') &&
@@ -72,7 +73,14 @@
         }).join('');
         tbody.innerHTML = rows;
         var cnt = document.getElementById('arCount');
-        if (cnt) cnt.textContent = "共 " + candidates.length + " 条路线";
+        if (cnt) {
+            var summaryParts = ["共 " + candidates.length + " 条路线"];
+            var factoryCount = (selection.factories || []).length;
+            var portCount = (selection.ports || []).length;
+            if (factoryCount > 0) summaryParts.push(factoryCount + " 家工厂");
+            if (portCount > 0) summaryParts.push(portCount + " 个始发港");
+            cnt.textContent = summaryParts.join(" · ");
+        }
         var emptyEl = document.getElementById('arEmpty');
         if (emptyEl) emptyEl.style.display = candidates.length ? 'none' : 'block';
         var ths = document.querySelectorAll('#arTable thead th[data-key]');

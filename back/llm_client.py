@@ -4,7 +4,7 @@ LLM客户端 — 基于真实数据构建富Prompt，调用LLM生成推荐方案
 
 推荐算法（v3）：
 1. 读取《各工厂最大订单数》表格，根据手套数量过滤产能足够的工厂
-2. 从11个国内始发港中，按《合约信息导出0806》海运费选出到终到港最便宜的5个
+2. 从11个国内始发港中，按《海运费参考标准》海运费选出到终到港最便宜的5个
 3. 枚举所有 工厂×始发港 路线，逐条计算全费用，按总价排序
 """
 import json
@@ -20,7 +20,7 @@ from config import (
     NORTH_AMERICA, FDA_COUNTRIES,
     FACTORY_MAX_ORDERS_FILE, DOMESTIC_ORIGIN_PORTS, FACTORY_MAX_ORDER_NAME_MAP,
     CONTRACT_FREIGHT_FILE, CONTRACT_BOX_COLUMNS,
-    CNY_TO_USD,
+    CNY_TO_USD, USD_TO_CNY,
 )
 from knowledge_base import KnowledgeBase
 from cost_calculator import CostCalculator
@@ -30,6 +30,19 @@ from cost_calculator import CostCalculator
 _CONTRACT_DF_CACHE = None
 _CONTRACT_DF_CACHE_TIME = 0
 _CONTRACT_CACHE_TTL = 600  # 10分钟
+
+# 手套数量单位 -> 千只（工厂产能单位）
+GLOVE_UNIT_TO_THOUSAND_PCS = {
+    "百支": 0.1,
+    "八百支": 0.8,
+    "支": 0.001,
+    "只": 0.001,
+    "千支": 1.0,
+    "千只": 1.0,
+    "万支": 10.0,
+    "万只": 10.0,
+    "双": 0.002,
+}
 
 
 def _load_contract_df():
@@ -114,6 +127,8 @@ class LLMClient:
         self.kb.build()
         self.cost_calc = CostCalculator()
         self._max_orders_df = None  # 延迟加载
+        self._cannot_meet_arrival = False
+        self._route_risk_warning = ""
 
     def recommend(self, input_data):
         """
@@ -209,12 +224,13 @@ class LLMClient:
             self._max_orders_df = pd.DataFrame()
             return self._max_orders_df
 
-    def _find_factories_by_capacity(self, product_type, glove_qty):
+    def _find_factories_by_capacity(self, product_type, glove_qty, glove_unit='千支'):
         """
         Step 1: 根据《各工厂最大订单数》过滤产能足够的工厂
 
         :param product_type: 产品类型（可能包含多个，如 "丁腈手套,PVC手套"）
-        :param glove_qty: 手套数量（千支）
+        :param glove_qty: 手套数量（数值）
+        :param glove_unit: 手套数量单位（千支/万支/只/双等）
         :return: [{"name": "工厂全名", "info": {...}, "capacity": float}, ...]
         """
         df = self._load_max_orders()
@@ -236,7 +252,9 @@ class LLMClient:
         else:
             capacity_col = "丁腈手套"
 
-        print(f"[产能过滤] 产品={primary_product}, 数量={glove_qty}千支, 产能列={capacity_col}")
+        unit_factor = GLOVE_UNIT_TO_THOUSAND_PCS.get(str(glove_unit).strip(), 1.0)
+        glove_qty_thousand = glove_qty * unit_factor
+        print(f"[产能过滤] 产品={primary_product}, 数量={glove_qty}{glove_unit} -> {glove_qty_thousand}千只, 产能列={capacity_col}")
 
         eligible = []
         for _, row in df.iterrows():
@@ -247,15 +265,15 @@ class LLMClient:
                 continue
 
             # 产能足够
-            if glove_qty > 0 and glove_qty > capacity:
-                print(f"  跳过 {company}: 产能={capacity}, 需求={glove_qty}")
+            if glove_qty_thousand > 0 and glove_qty_thousand > capacity:
+                print(f"  跳过 {company}: 产能={capacity}千只, 需求={glove_qty_thousand}千只")
                 continue
 
             # 映射到内部工厂名
             internal_name = FACTORY_MAX_ORDER_NAME_MAP.get(company, company)
             info = self.kb.factory_info.get(internal_name)
             if info is None:
-                print(f"  警告: {company} → {internal_name} 未在知识库中找到")
+                print(f"  警告: {company} -> {internal_name} 未在知识库中找到")
                 continue
 
             eligible.append({
@@ -263,7 +281,7 @@ class LLMClient:
                 "info": info,
                 "capacity": float(capacity),
             })
-            print(f"  入选 {company} → {internal_name}: 产能={capacity}")
+            print(f"  入选 {company} -> {internal_name}: 产能={capacity}")
 
         print(f"[产能过滤] 结果: {len(eligible)}/{df.shape[0]} 家工厂入选")
         return eligible
@@ -279,10 +297,20 @@ class LLMClient:
         """
         contract_df = _load_contract_df()
         if contract_df.empty:
-            print("[海运费比价] 合约数据为空，使用全部11个港口")
-            return [{"port": std_name, "rate_cny": 0, "rate_usd": 0,
-                     "carrier": "", "currency": "USD", "note": "无合约数据"}
-                    for std_name in DOMESTIC_ORIGIN_PORTS.values()]
+            print("[海运费比价] 合约数据为空，使用前5个国内港口兜底")
+            return [
+                {
+                    "port": std_name,
+                    "port_cn": cn_name,
+                    "rate_cny": 0,
+                    "rate_usd": 0,
+                    "carrier": "",
+                    "currency": "USD",
+                    "is_valid": False,
+                    "note": "无合约数据",
+                }
+                for cn_name, std_name in list(DOMESTIC_ORIGIN_PORTS.items())[:5]
+            ]
 
         # 确定合约箱型列名
         bt = str(box_type).strip().upper()
@@ -301,9 +329,19 @@ class LLMClient:
 
         if box_col not in contract_df.columns:
             print(f"[海运费比价] 箱型列 {box_col} 不在合约表中")
-            return [{"port": std_name, "rate_cny": 0, "rate_usd": 0,
-                     "carrier": "", "currency": "USD", "note": f"无{box_col}列"}
-                    for std_name in DOMESTIC_ORIGIN_PORTS.values()]
+            return [
+                {
+                    "port": std_name,
+                    "port_cn": cn_name,
+                    "rate_cny": 0,
+                    "rate_usd": 0,
+                    "carrier": "",
+                    "currency": "USD",
+                    "is_valid": False,
+                    "note": f"无{box_col}列",
+                }
+                for cn_name, std_name in list(DOMESTIC_ORIGIN_PORTS.items())[:5]
+            ]
 
         today = pd.Timestamp.now().normalize()
         port_rates = []
@@ -329,7 +367,7 @@ class LLMClient:
                     matched = contract_df[origin_mask & dest_mask_loose & contract_df[box_col].notna() & (contract_df[box_col] > 0)]
 
             if matched.empty:
-                print(f"  {cn_name} → {dest_port}: 无匹配合约")
+                print(f"  {cn_name} -> {dest_port}: 无匹配合约")
                 continue
 
             # 区分有效/无效合约
@@ -343,20 +381,22 @@ class LLMClient:
                     is_valid = False
                 if pd.notna(effective_to) and today > effective_to:
                     is_valid = False
+                raw_currency = row.get('币种', 'USD')
+                currency = 'USD' if pd.isna(raw_currency) else (str(raw_currency).strip().upper() or 'USD')
                 valid_matched.append({
                     'rate': rate,
                     'is_valid': is_valid,
                     'carrier': str(row.get('船公司简称', '')),
-                    'currency': str(row.get('币种', 'USD')),
+                    'currency': currency,
                 })
 
             # 有效合约中取最低价；无有效合约则取所有中最低价
             valid_rates = [m for m in valid_matched if m['is_valid']]
             best = min(valid_rates, key=lambda x: x['rate']) if valid_rates else min(valid_matched, key=lambda x: x['rate'])
 
-            usd_to_cny = 7.2
+            currency = best['currency']
             rate_usd = best['rate']
-            rate_cny = round(rate_usd * usd_to_cny, 2)
+            rate_cny = round(rate_usd * USD_TO_CNY, 2) if currency == 'USD' else round(rate_usd, 2)
 
             port_rates.append({
                 "port": std_name,
@@ -368,8 +408,8 @@ class LLMClient:
                 "is_valid": best['is_valid'],
                 "note": f"{best['carrier']} {best['currency']} {rate_usd}/{CONTRACT_BOX_COLUMNS.get(box_type, box_col)}"
             })
-            print(f"  {cn_name} → {dest_port}: 最低 {best['carrier']} {best['currency']} {rate_usd} "
-                  f"(¥{rate_cny}) {'✓有效' if best['is_valid'] else '⚠过期'}")
+            print(f"  {cn_name} -> {dest_port}: best {best['carrier']} {best['currency']} {rate_usd} "
+                  f"(CNY{rate_cny}) {'[VALID]' if best['is_valid'] else '[EXPIRED]'}")
 
         # 按海运费升序，取前5
         port_rates.sort(key=lambda x: (0 if x['is_valid'] else 1, x['rate_cny']))
@@ -427,7 +467,8 @@ class LLMClient:
         product_type = input_data.get("productType", "")
         dest_country = input_data.get("destCountry", "")
         dest_port = input_data.get("destPort", "")
-        glove_qty = int(input_data.get("gloveQty", 0) or 0)
+        glove_qty = float(input_data.get("gloveQty", 0) or 0)
+        glove_unit = input_data.get("gloveUnit", "千支") or "千支"
         transport_pref = input_data.get("transportPref", "balanced")
 
         # 箱型
@@ -437,7 +478,9 @@ class LLMClient:
         if box_type_counts and isinstance(box_type_counts, dict) and len(box_type_counts) > 0:
             box_type = list(box_type_counts.keys())[0]
         else:
-            box_type = self.cost_calc.suggest_box_type(volume, weight)
+            # 未指定箱型时默认 40HQ（suggest_box_type 对极小体积会返回 LCL，不适合此场景）
+            suggested = self.cost_calc.suggest_box_type(volume, weight)
+            box_type = suggested if suggested != 'LCL' else '40HQ'
             box_type_counts = None
 
         # 贸易条款
@@ -446,7 +489,7 @@ class LLMClient:
         trade_term = user_trade_term or self.kb.get_best_trade_term(dest_country)
 
         # ===== Step 1: 过滤产能足够的工厂 =====
-        factories = self._find_factories_by_capacity(product_type, glove_qty)
+        factories = self._find_factories_by_capacity(product_type, glove_qty, glove_unit)
         if not factories:
             print("[候选生成] 无产能足够的工厂！")
             return []
@@ -491,7 +534,7 @@ class LLMClient:
                 self._apply_modified_cost_items(cost, input_data)
 
                 # 计算时间线
-                timeline = self._calculate_timeline(input_data, factory_name, dest_country)
+                timeline = self._calculate_timeline(input_data, factory_name, dest_country, origin_port)
 
                 # 计算优先级分数（基于总费用）
                 score = self._calculate_score_v3(info, cost, timeline, transport_pref, port_info)
@@ -538,8 +581,61 @@ class LLMClient:
                     },
                 })
 
-        # ===== Step 4: 按总费用升序排列 =====
-        candidates.sort(key=lambda x: x["cost"]["total_cny"])
+        # ===== Step 4: 归一化评分并按到货约束排序 =====
+        required_arrival = None
+        required_arrival_str = input_data.get("requiredArrival", "")
+        if required_arrival_str:
+            try:
+                required_arrival = datetime.fromisoformat(required_arrival_str.replace("Z", ""))
+            except (ValueError, TypeError):
+                required_arrival = None
+
+        remarks = str(input_data.get("remarks", "") or "")
+        urgent = bool(input_data.get("urgent", False)) or any(k in remarks for k in ("加急", "urgent", "URGENT"))
+
+        total_costs = [c["cost"]["total_cny"] for c in candidates]
+        total_days = [c["timeline"]["total_days"] for c in candidates]
+        min_cost = min(total_costs) if total_costs else 0
+        max_cost = max(total_costs) if total_costs else 0
+        min_days = min(total_days) if total_days else 0
+        max_days = max(total_days) if total_days else 0
+        cost_range = max_cost - min_cost
+        days_range = max_days - min_days
+
+        for c in candidates:
+            cost_norm = (max_cost - c["cost"]["total_cny"]) / cost_range if cost_range > 0 else 1.0
+            time_norm = (max_days - c["timeline"]["total_days"]) / days_range if days_range > 0 else 1.0
+            if urgent:
+                score = cost_norm * 0.3 + time_norm * 0.7
+            else:
+                score = cost_norm * 0.7 + time_norm * 0.3
+            c["score"] = round(score * 100, 1)
+            c["score_weights"] = {"cost": 0.3 if urgent else 0.7, "time": 0.7 if urgent else 0.3}
+
+            meets_arrival = True
+            if required_arrival is not None:
+                try:
+                    eta = datetime.strptime(c["timeline"]["eta"], "%Y-%m-%d")
+                    meets_arrival = eta <= required_arrival
+                except (ValueError, TypeError):
+                    meets_arrival = False
+            c["meets_arrival"] = meets_arrival
+
+        self._cannot_meet_arrival = bool(required_arrival is not None and not any(c["meets_arrival"] for c in candidates))
+        self._route_risk_warning = ""
+        if self._cannot_meet_arrival:
+            self._route_risk_warning = (
+                f"所有方案预计到货时间均晚于客户要求到货时间（{required_arrival_str}），"
+                "无法按客户约定时间到货，建议与客户确认延期或选择更早船期。"
+            )
+
+        if urgent or self._cannot_meet_arrival:
+            # 条例2：按时效升序排列，时效相同再按评分降序
+            candidates.sort(key=lambda x: (x["timeline"]["total_days"], -x["score"]))
+        else:
+            # 条例1：优先满足客户到货时间，再按综合评分降序
+            candidates.sort(key=lambda x: (0 if x["meets_arrival"] else 1, -x["score"]))
+
         print(f"[候选生成] 共 {len(candidates)} 条路线（{len(factories)} 工厂 × {len(top_5_ports)} 始发港）")
         return candidates
 
@@ -600,7 +696,7 @@ class LLMClient:
 
         return round(max(0, min(100, score)), 1)
 
-    def _calculate_timeline(self, input_data, factory_name, dest_country):
+    def _calculate_timeline(self, input_data, factory_name, dest_country, origin_port=''):
         """计算运输时间线"""
         cargo_ready_str = input_data.get("cargoReady", "")
         ship_schedule_str = input_data.get("shipSchedule", "")
@@ -620,16 +716,24 @@ class LLMClient:
         region = info.get("region", "国内")
         if region == "海外":
             inland_days = 2
+            inland_days_source = "overseas_estimate"
         else:
-            province = info.get("province", "")
-            if province in ["山东"]:
-                inland_days = 2
-            elif province in ["安徽", "江西"]:
-                inland_days = 3
-            elif province in ["上海", "江苏"]:
-                inland_days = 1
+            from route_pricing import query_land_transit_time
+            time_result = query_land_transit_time(factory_name, origin_port, 'direct')
+            if time_result and time_result.get('days'):
+                inland_days = max(1, int(round(time_result['days'])))
+                inland_days_source = time_result.get('source', 'excel_time_analysis')
             else:
-                inland_days = 3
+                province = info.get("province", "")
+                if province in ["山东"]:
+                    inland_days = 2
+                elif province in ["安徽", "江西"]:
+                    inland_days = 3
+                elif province in ["上海", "江苏"]:
+                    inland_days = 1
+                else:
+                    inland_days = 3
+                inland_days_source = "province_estimate"
 
         # 海运天数
         ocean_days = int(self.kb.get_ocean_days(dest_country))
@@ -652,6 +756,7 @@ class LLMClient:
             "cargo_ready": cargo_ready.strftime("%Y-%m-%d"),
             "ship_schedule": ship_schedule.strftime("%Y-%m-%d"),
             "inland_days": inland_days,
+            "inland_days_source": inland_days_source,
             "ocean_days": ocean_days,
             "waiting_days": waiting_days,
             "etd": etd.strftime("%Y-%m-%d"),
@@ -712,6 +817,27 @@ class LLMClient:
 
         primary = candidates[0]
         alternatives = candidates[1:4]
+        eligible_factory_names = []
+        selected_origin_ports = []
+        seen_ports = set()
+        for c in candidates:
+            if c["factory"] not in eligible_factory_names:
+                eligible_factory_names.append(c["factory"])
+            port_key = c["origin_port"]
+            if port_key not in seen_ports:
+                seen_ports.add(port_key)
+                port_entry = dict(c.get("ocean_freight_info") or {
+                    "port": port_key,
+                    "port_cn": c.get("origin_port_cn", port_key),
+                    "rate_cny": 0,
+                    "rate_usd": 0,
+                    "carrier": "",
+                    "currency": "USD",
+                    "is_valid": False,
+                    "note": "无合约数据",
+                })
+                port_entry["dest_port"] = c["dest_port"]
+                selected_origin_ports.append(port_entry)
 
         reasoning = self._generate_reasoning(input_data, primary, alternatives)
 
@@ -779,6 +905,8 @@ class LLMClient:
                     "inlandDays": c["timeline"]["inland_days"],
                     "oceanDays": c["timeline"]["ocean_days"],
                     "score": c["score"],
+                    "meetsArrival": c.get("meets_arrival", True),
+                    "scoreWeights": c.get("score_weights", {}),
                     "pricingSource": c.get("pricing_source", "rule_engine"),
                     "dataQuality": c.get("data_quality", "medium"),
                     "originPortSource": c.get("origin_port_source", ""),
@@ -792,8 +920,12 @@ class LLMClient:
                 for c in candidates
             ],
             "reasoning": reasoning,
+            "risk_warning": self._route_risk_warning,
+            "cannotMeetArrival": self._cannot_meet_arrival,
             "dataStats": self._get_data_stats(input_data.get("destCountry", "")),
-            "eligibleFactories": len(candidates),
+            "eligibleFactories": len(eligible_factory_names),
+            "eligibleFactoryNames": eligible_factory_names,
+            "selectedOriginPorts": selected_origin_ports,
             "generatedAt": datetime.now().isoformat(),
         }
 
@@ -841,7 +973,7 @@ class LLMClient:
 
         # 费用理由
         fee_count = len(primary["cost"]["items"])
-        reasons.append(f"费用方案含{fee_count}项明细，总费用约{cost:.0f} CNY（{cost/7.2:.0f} USD）")
+        reasons.append(f"费用方案含{fee_count}项明细，总费用约{cost:.0f} CNY（{cost * CNY_TO_USD:.0f} USD）")
 
         # 时效理由
         reasons.append(f"预计总运输周期{days}天（内陆{primary['timeline']['inland_days']}天+海运{primary['timeline']['ocean_days']}天）")
@@ -1039,13 +1171,13 @@ class LLMClient:
             revert_reason = ""
 
             if score_diff <= 0 and cost_diff > 0:
-                # 分数不更高但费用更高 → 没有理由选它
+                # 分数不更高但费用更高 — 没有理由选它
                 should_revert = True
-                revert_reason = f"分数相同({selected_score})但费用高¥{cost_diff:,.0f}"
+                revert_reason = f"分数相同({selected_score})但费用高CNY{cost_diff:,.0f}"
             elif 0 < score_diff <= 3 and selected_days >= cheapest_days and cost_diff > 0:
-                # 分数略高但天数没优势 → 花钱买不到时效，不值
+                # 分数略高但天数没优势 — 花钱买不到时效，不值
                 should_revert = True
-                revert_reason = f"评分仅高{score_diff}分但运输天数无优势(贵¥{cost_diff:,.0f})"
+                revert_reason = f"评分仅高{score_diff}分但运输天数无优势(贵CNY{cost_diff:,.0f})"
 
             if should_revert:
                 print(f"[LLM质检] 拒绝LLM选择(方案{primary_idx+1}), 回退到最便宜方案: {revert_reason}")
@@ -1101,7 +1233,10 @@ class LLMClient:
 
         # 添加LLM生成的理由
         result["reasoning"] = llm_result.get("reasoning", result["reasoning"])
-        result["risk_warning"] = llm_result.get("risk_warning", "")
+        if self._cannot_meet_arrival:
+            result["risk_warning"] = self._route_risk_warning
+        else:
+            result["risk_warning"] = llm_result.get("risk_warning", "")
         result["optimization_suggestion"] = llm_result.get("optimization_suggestion", "")
         result["llm_model"] = LLM_MODEL
 
@@ -1177,9 +1312,9 @@ class LLMClient:
             if total <= 0:
                 return self._rule_toll_fee(province, origin_port, box_count)
 
-            print(f"[LLM高速费] {province}→{origin_port}, {box_count}箱, "
+            print(f"[LLM高速费] {province}->{origin_port}, {box_count}箱, "
                   f"距离={result.get('distance_km')}km, 卡车={result.get('trucks')}辆, "
-                  f"高速费=¥{total}, 理由: {result.get('reasoning', '')[:80]}")
+                  f"高速费=CNY{total}, 理由: {result.get('reasoning', '')[:80]}")
             return total
 
         except Exception as e:
@@ -1205,8 +1340,8 @@ class LLMClient:
         # 估算卡车数量
         trucks = max(1, round(box_count / 2.5))
         total = round(distance * toll_rate + distance * 0.5) * trucks
-        print(f"[规则高速费] {province}→{origin_port}, {box_count}箱, "
-              f"距离={distance}km, 卡车={trucks}辆, 高速费≈¥{total}")
+        print(f"[规则高速费] {province}->{origin_port}, {box_count}箱, "
+              f"距离={distance}km, 卡车={trucks}辆, 高速费~CNY{total}")
         return total
 
     # ===== LLM 路线费用估算（数据不足时的补充）=====
@@ -1278,7 +1413,7 @@ class LLMClient:
 - 中国到东南亚海运费约 500-1500 USD/40HQ
 - 陆运费约 1500-3000 元/箱（视距离）
 - 港杂费约 1500-3000 元/箱
-- 汇率：1 USD ≈ 7.2 CNY
+- 汇率：1 USD ≈ {USD_TO_CNY} CNY
 
 ## 输出格式（严格JSON，不要其他文字）
 {{
@@ -1333,26 +1468,26 @@ class LLMClient:
 
             fee_items = [
                 {"name": "港杂费", "category": "出口起运港港杂费",
-                 "amount_cny": port_fee, "amount_usd": round(port_fee / 7.2, 2),
+                 "amount_cny": port_fee, "amount_usd": round(port_fee * CNY_TO_USD, 2),
                  "basis": f"LLM估算：单箱{result.get('port_fee_per_box', 2500)}元 × {total_boxes}箱"},
                 {"name": "VGM费", "category": "海管家费用",
-                 "amount_cny": vgm_fee, "amount_usd": round(vgm_fee / 7.2, 2),
+                 "amount_cny": vgm_fee, "amount_usd": round(vgm_fee * CNY_TO_USD, 2),
                  "basis": f"单箱5元 × {total_boxes}箱"},
                 {"name": "舱单费", "category": "海管家费用",
-                 "amount_cny": manifest_fee, "amount_usd": round(manifest_fee / 7.2, 2),
+                 "amount_cny": manifest_fee, "amount_usd": round(manifest_fee * CNY_TO_USD, 2),
                  "basis": "固定费用（按单）"},
-                {"name": "陆运费", "category": "出口起运港拖车费",
-                 "amount_cny": inland_fee, "amount_usd": round(inland_fee / 7.2, 2),
+                {"name": "陆运费", "category": "工厂到起运港拖车费",
+                 "amount_cny": inland_fee, "amount_usd": round(inland_fee * CNY_TO_USD, 2),
                  "basis": f"LLM估算：单箱{result.get('inland_fee_per_box', 2000)}元 × {total_boxes}箱"},
                 {"name": "报关费", "category": "出口报关单证费",
-                 "amount_cny": customs_fee, "amount_usd": round(customs_fee / 7.2, 2),
+                 "amount_cny": customs_fee, "amount_usd": round(customs_fee * CNY_TO_USD, 2),
                  "basis": "固定费用（按单）"},
             ]
 
             if trade_term in ("CIF", "CFR", "DDP", "DAP"):
                 fee_items.append({
                     "name": "海运费", "category": "出口海运费",
-                    "amount_cny": ocean_fee, "amount_usd": round(ocean_fee / 7.2, 2),
+                    "amount_cny": ocean_fee, "amount_usd": round(ocean_fee * CNY_TO_USD, 2),
                     "basis": f"LLM估算：单箱{result.get('ocean_fee_per_box', 18000)}元 × {total_boxes}箱",
                 })
 
@@ -1360,7 +1495,7 @@ class LLMClient:
                 insurance_fee = round(ocean_fee * 0.003, 2)
                 fee_items.append({
                     "name": "保险费", "category": "保险费",
-                    "amount_cny": insurance_fee, "amount_usd": round(insurance_fee / 7.2, 2),
+                    "amount_cny": insurance_fee, "amount_usd": round(insurance_fee * CNY_TO_USD, 2),
                     "basis": "海运费×0.3%",
                 })
 
@@ -1368,15 +1503,15 @@ class LLMClient:
                 dest_port_fee = round(float(result.get("port_fee_per_box", 2500)) * 0.8 * total_boxes, 2)
                 fee_items.append({
                     "name": "目的港港杂费", "category": "出口目的港港杂费",
-                    "amount_cny": dest_port_fee, "amount_usd": round(dest_port_fee / 7.2, 2),
+                    "amount_cny": dest_port_fee, "amount_usd": round(dest_port_fee * CNY_TO_USD, 2),
                     "basis": f"始发港杂费×80% × {total_boxes}箱",
                 })
 
             total_cny = round(sum(item["amount_cny"] for item in fee_items), 2)
             total_usd = round(sum(item["amount_usd"] for item in fee_items), 2)
 
-            print(f"[LLM路线估算] {factory_name}→{origin_port}→{dest_port}, "
-                  f"{total_boxes}箱, 总费用=¥{total_cny}, "
+            print(f"[LLM路线估算] {factory_name}->{origin_port}->{dest_port}, "
+                  f"{total_boxes}箱, 总费用=CNY{total_cny}, "
                   f"理由: {result.get('reasoning', '')[:80]}")
 
             return {

@@ -8,7 +8,7 @@ Flask API 服务器 — 物流运输路径智能优化后端（基于8张数据�
   GET  /api/logistics/countries  — 获取所有运抵国列表
   GET  /api/logistics/country-info — 获取指定运抵国详情
   GET  /api/logistics/health     — 健康检查
-  GET  /api/freight-rate         — 海运费合约查询（读取合约信息导出0806.xlsx）
+  GET  /api/freight-rate         — 海运费合约查询（读取海运费参考标准.xlsx）
   GET  /api/route-info           — 航线信息查询（产品→工厂→港口链路）
 """
 import sys
@@ -32,6 +32,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
 from recommendation_engine import RecommendationEngine
+import route_pricing
+import db
 
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "front"), static_url_path="")
 CORS(app, origins=config.CORS_ORIGINS)
@@ -42,6 +44,13 @@ engine = None
 
 @app.route('/')
 def index():
+    """登录页"""
+    return app.send_static_file('index.html')
+
+
+@app.route('/app')
+def app_page():
+    """主应用"""
     return app.send_static_file('logistics-optimizer.html')
 
 
@@ -51,6 +60,7 @@ def get_engine():
         print("[启动] 正在加载8张数据表并构建知识库...")
         engine = RecommendationEngine()
         print("[启动] 知识库构建完成")
+        db.safe_init_db()
     return engine
 
 
@@ -146,7 +156,7 @@ def recommend():
         return jsonify({'error': '请求体不能为空'}), 400
 
     # 参数校验
-    required = ['productType', 'destCountry', 'boxCount', 'weight', 'volume', 'cargoReady', 'shipSchedule']
+    required = ['productType', 'destCountry', 'boxCount', 'weight', 'volume', 'cargoReady']
     for field in required:
         if field not in data or data[field] in (None, ''):
             return jsonify({'error': f'缺少必填字段: {field}'}), 400
@@ -154,6 +164,9 @@ def recommend():
     try:
         eng = get_engine()
         result = eng.recommend(data)
+
+        if not result.get('primary'):
+            return jsonify({'success': False, 'error': result.get('error', '未找到符合条件的路线')}), 404
 
         # 构建前端友好的响应格式
         primary = result.get('primary', {})
@@ -167,6 +180,7 @@ def recommend():
                 'allCandidates': result.get('allCandidates', []),
                 'reasoning': result.get('reasoning', ''),
                 'riskWarning': result.get('risk_warning', ''),
+                'cannotMeetArrival': result.get('cannotMeetArrival', False),
                 'optimizationSuggestion': result.get('optimization_suggestion', ''),
                 'dataStats': result.get('dataStats', {}),
                 'source': result.get('source', 'rule_engine'),
@@ -174,11 +188,14 @@ def recommend():
                 'llmEnabled': result.get('llm_enabled', False),
                 'llmModel': result.get('llm_model', ''),
                 'eligibleFactoriesCount': result.get('eligibleFactories', 0),
+                'eligibleFactoryNames': result.get('eligibleFactoryNames', []),
+                'selectedOriginPorts': result.get('selectedOriginPorts', []),
                 'totalRoutes': len(result.get('allCandidates', [])),
                 'dataSources': result.get('data_sources', []),
                 'generatedAt': result.get('generatedAt', datetime.now().isoformat()),
             }
         }
+        db.safe_save_recommendation(data, response)
         return jsonify(response)
 
     except Exception as e:
@@ -444,7 +461,7 @@ def get_route_info():
     })
 
 
-# ===== 海运费合约查询（读取本地合约信息导出0806.xlsx）=====
+# ===== 海运费合约查询（读取本地海运费参考标准.xlsx）=====
 
 import pandas as pd
 import re as _re
@@ -582,12 +599,14 @@ def _contract_find_rates(df, origin, destination, box_type):
         if effective_to and today > effective_to:
             is_valid = False
 
+        raw_currency = row.get('币种', 'USD')
+        currency = 'USD' if pd.isna(raw_currency) else (str(raw_currency).strip().upper() or 'USD')
         results.append({
             'carrier': row.get('船公司简称', ''),
             'origin': row.get('起运港', ''),
             'destination': row.get('目的港', ''),
             'rate': rate,
-            'currency': str(row.get('币种', 'USD')),
+            'currency': currency,
             'effectiveFrom': effective_from.strftime('%Y-%m-%d') if effective_from and pd.notna(effective_from) else None,
             'effectiveTo': effective_to.strftime('%Y-%m-%d') if effective_to and pd.notna(effective_to) else None,
             'isValid': is_valid,
@@ -601,7 +620,7 @@ def _contract_find_rates(df, origin, destination, box_type):
 
 @app.route('/api/freight-rate', methods=['GET'])
 def get_freight_rate():
-    """海运费合约查询接口（读取合约信息导出0806.xlsx）
+    """海运费合约查询接口（读取海运费参考标准.xlsx）
 
     参数:
         origin      — 起运港（如 "上海/SHANGHAI"）
@@ -668,7 +687,7 @@ def get_freight_rate():
 
     result = {
         'success': True,
-        'source': '合约信息导出0806.xlsx',
+        'source': '海运费参考标准.xlsx',
         'data': {
             'origin': origin,
             'destination': destination,
@@ -828,7 +847,7 @@ def get_freight_rate_batch():
 
     return jsonify({
         'success': True,
-        'source': '合约信息导出0806.xlsx',
+        'source': '海运费参考标准.xlsx',
         'totalRoutes': len(routes),
         'successCount': len(results),
         'failCount': len(errors),
@@ -843,7 +862,7 @@ def get_freight_rate_batch():
 def _contract_find_carrier_rates_multi(df, origin, destination, box_types):
     """从合约表中查找所有匹配的船公司，并返回各箱型报价
 
-    返回: dict — {carrier_name: {boxType: rate, ...}}
+    返回: dict — {carrier_name: {isValid, rates, rateValidity, rateEffectiveTo, effectiveTo, currency}}
     """
     if df.empty:
         return {}
@@ -885,9 +904,9 @@ def _contract_find_carrier_rates_multi(df, origin, destination, box_types):
     if not box_col_map:
         return {}
 
-    # 按船公司分组，收集各箱型报价（取有效的最低报价）
+    # 按船公司分组，先收集所有行，再逐箱型选择“有效合约中的最低价”
     today = pd.Timestamp.now().normalize()
-    carrier_rates = {}
+    carrier_rows = {}
 
     for _, row in route_matched.iterrows():
         carrier = str(row.get('船公司简称', '')).strip()
@@ -903,27 +922,65 @@ def _contract_find_carrier_rates_multi(df, origin, destination, box_types):
         if pd.notna(effective_to) and today > effective_to:
             is_valid = False
 
-        if carrier not in carrier_rates:
-            carrier_rates[carrier] = {'isValid': is_valid, 'rates': {}}
-        else:
-            # 如果已有记录且新的是有效的，保留有效的
-            if is_valid and not carrier_rates[carrier]['isValid']:
-                carrier_rates[carrier]['isValid'] = True
+        if carrier not in carrier_rows:
+            carrier_rows[carrier] = []
 
-        # 收集各箱型报价（取最低价）
+        row_rates = {}
         for bt, col in box_col_map.items():
             val = row[col]
             if pd.notna(val) and float(val) > 0:
-                rate = float(val)
-                existing = carrier_rates[carrier]['rates'].get(bt)
-                if existing is None or rate < existing:
-                    carrier_rates[carrier]['rates'][bt] = rate
+                row_rates[bt] = float(val)
 
-        # 币种
-        if '币种' in row and pd.notna(row['币种']):
-            carrier_rates[carrier]['currency'] = str(row['币种'])
+        eff_to_str = None
+        if pd.notna(effective_to):
+            eff_to_str = effective_to.strftime('%Y-%m-%d') if hasattr(effective_to, 'strftime') else str(effective_to)
 
-    return carrier_rates
+        carrier_rows[carrier].append({
+            'is_valid': is_valid,
+            'rates': row_rates,
+            'effective_to': eff_to_str,
+            'currency': str(row.get('币种', 'USD') or 'USD').strip().upper() or 'USD',
+        })
+
+    result = {}
+    for carrier, rows in carrier_rows.items():
+        rates = {}
+        rate_validity = {}
+        rate_effective_to = {}
+
+        for bt, col in box_col_map.items():
+            valid_candidates = [r for r in rows if r['is_valid'] and r['rates'].get(bt) is not None]
+            all_candidates = [r for r in rows if r['rates'].get(bt) is not None]
+
+            if valid_candidates:
+                best = min(valid_candidates, key=lambda r: r['rates'][bt])
+                rates[bt] = best['rates'][bt]
+                rate_validity[bt] = True
+                rate_effective_to[bt] = best['effective_to']
+            elif all_candidates:
+                best = min(all_candidates, key=lambda r: r['rates'][bt])
+                rates[bt] = best['rates'][bt]
+                rate_validity[bt] = False
+                rate_effective_to[bt] = best['effective_to']
+
+        if not rates:
+            continue
+
+        carrier_is_valid = all(rate_validity.values())
+        all_effective_dates = [d for d in rate_effective_to.values() if d]
+        effective_to = min(all_effective_dates) if all_effective_dates else None
+        currency = rows[-1].get('currency') or 'USD'
+
+        result[carrier] = {
+            'isValid': carrier_is_valid,
+            'rates': rates,
+            'rateValidity': rate_validity,
+            'rateEffectiveTo': rate_effective_to,
+            'effectiveTo': effective_to,
+            'currency': currency,
+        }
+
+    return result
 
 
 @app.route('/api/freight-rate-compare', methods=['POST'])
@@ -973,7 +1030,13 @@ def compare_freight_rates():
             rate = info['rates'].get(bt)
             if rate is None:
                 has_all_types = False
-                per_type_detail[bt] = {'rate': None, 'qty': qty, 'subtotalCny': None}
+                per_type_detail[bt] = {
+                    'rate': None,
+                    'qty': qty,
+                    'subtotalCny': None,
+                    'isValid': False,
+                    'effectiveTo': info.get('rateEffectiveTo', {}).get(bt),
+                }
             else:
                 currency = info.get('currency', 'USD')
                 rate_cny = rate * usd_to_cny if currency == 'USD' else rate
@@ -985,6 +1048,8 @@ def compare_freight_rates():
                     'qty': qty,
                     'subtotalCny': subtotal,
                     'currency': currency,
+                    'isValid': info.get('rateValidity', {}).get(bt, False),
+                    'effectiveTo': info.get('rateEffectiveTo', {}).get(bt),
                 }
 
         # 只有至少有一种箱型报价的船公司才加入比较
@@ -1000,6 +1065,7 @@ def compare_freight_rates():
             'perTypeDetail': per_type_detail,
             'hasAllTypes': has_all_types,
             'currency': info.get('currency', 'USD'),
+            'effectiveTo': info.get('effectiveTo'),
         })
 
     # 按总价升序排列（便宜的在前面），有效的优先
@@ -1007,7 +1073,7 @@ def compare_freight_rates():
 
     return jsonify({
         'success': True,
-        'source': '合约信息导出0806.xlsx',
+        'source': '海运费参考标准.xlsx',
         'data': {
             'origin': origin,
             'destination': destination,
@@ -1175,24 +1241,6 @@ def estimate_toll():
     })
 
 
-if __name__ == '__main__':
-    print("=" * 60)
-    print("物流运输路径智能优化 API 服务 v3")
-    print("基于7张核心数据表 + 规则/LLM双引擎")
-    print("=" * 60)
-    print(f"LLM 模式: {'启用 (' + config.LLM_MODEL + ')' if config.LLM_ENABLED else '未启用（使用规则引擎）'}")
-    print(f"监听地址: http://{config.HOST}:{config.PORT}")
-    print(f"数据源: {len(config.FILES)} 张Excel表")
-    print("=" * 60)
-
-    # 预加载
-    print("\n[预加载] 正在加载数据并构建知识库...")
-    get_engine()
-    print("[预加载] 完成\n")
-
-    app.run(host=config.HOST, port=config.PORT, debug=True)
-
-
 # ===== 港杂费推荐接口 =====
 
 # 港杂费标准表缓存
@@ -1277,6 +1325,21 @@ def get_port_misc_fee():
         match_desc = f'{origin} / {bt_norm}（贸易条款=auto，跳过）'
 
     if matched.empty:
+        # 回退：40GP/40NOR 无数据时尝试 40HQ（费用相近，数据覆盖更全）
+        if bt_norm in ('40GP', '40NOR'):
+            box_fallback_mask = df['箱型'].str.strip().str.upper() == '40HQ'
+            if not skip_term and trade_term.strip().upper() not in ('', 'AUTO', '智能推荐'):
+                fb_matched = df[origin_mask & term_mask & box_fallback_mask].copy()
+                if fb_matched.empty:
+                    fb_matched = df[origin_mask & box_fallback_mask].copy()
+            else:
+                fb_matched = df[origin_mask & box_fallback_mask].copy()
+            if not fb_matched.empty:
+                matched = fb_matched
+                match_desc = f'{origin} / {trade_term} / {bt_norm}→40HQ（箱型回退，40GP→40HQ）'
+                print(f'[港杂费] 箱型回退: {bt_norm}→40HQ, 匹配{len(matched)}条')
+
+    if matched.empty:
         print(f'[港杂费] 无匹配: {match_desc}')
         return jsonify({
             'success': False,
@@ -1330,84 +1393,10 @@ def get_port_misc_fee():
     })
 
 
-# ===== 陆运费推荐（各路线报价卡） =====
-
-_ROUTE_PRICING_CACHE = None
-_ROUTE_PRICING_CACHE_TIME = None
-_ROUTE_PRICING_CACHE_TTL = 600  # 10分钟缓存
-
-
-def _load_route_pricing_data():
-    """加载各路线报价卡 Excel 文件（带缓存）"""
-    global _ROUTE_PRICING_CACHE, _ROUTE_PRICING_CACHE_TIME
-    now = time.time()
-    if _ROUTE_PRICING_CACHE is not None and _ROUTE_PRICING_CACHE_TIME is not None:
-        if now - _ROUTE_PRICING_CACHE_TIME < _ROUTE_PRICING_CACHE_TTL:
-            return _ROUTE_PRICING_CACHE
-    fpath = config.ROUTE_PRICING_FILE
-    if not os.path.exists(fpath):
-        print(f"[路线报价卡] 文件不存在: {fpath}")
-        return None
-    try:
-        xl = pd.ExcelFile(fpath)
-        _ROUTE_PRICING_CACHE = xl
-        _ROUTE_PRICING_CACHE_TIME = now
-        print(f"[路线报价卡] 加载完成: {len(xl.sheet_names)} 个 Sheet")
-        return xl
-    except Exception as e:
-        print(f"[路线报价卡] 加载失败: {e}")
-        return None
-
-
-def _find_route_sheet(xl, factory_name, origin_port):
-    """在 Excel 的所有 Sheet 中查找匹配工厂+始发港的 Sheet"""
-    if xl is None:
-        return None
-
-    import re
-    # 提取工厂核心名称（去掉后缀差异：用品/制品/科技等）
-    factory_core = factory_name
-    match = re.search(r'(.+英科.+?)(?:医疗|用品|制品|科技|卫生|印刷).*$', factory_name)
-    if match:
-        factory_core = match.group(1)
-
-    # 提取始发港中文名
-    port_short = origin_port.split('/')[0] if '/' in origin_port else origin_port
-
-    candidates = []
-    for sname in xl.sheet_names:
-        # 跳过说明/汇总 Sheet（00-04 和 99 开头的 Sheet）
-        prefix = sname.split('_')[0] if '_' in sname else ''
-        if prefix in ('00', '01', '02', '03', '04', '99'):
-            continue
-        # 检查 Sheet 名是否包含港口名
-        if port_short not in sname:
-            continue
-        # 检查 Sheet 名是否包含工厂名（精确或核心部分）
-        if factory_name in sname:
-            candidates.append((sname, 2))
-        elif factory_core and factory_core in sname:
-            candidates.append((sname, 1))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda x: x[1], reverse=True)
-    return candidates[0][0]
-
-
-# 运输方式映射（前端值 → Excel 中文值）
-TRANSPORT_MODE_MAP = {
-    'direct': '直拖',
-    'seaRail': '海铁',
-    'factorySelf': '工厂自运',
-    'landToWater': '陆改水',
-}
-
 
 @app.route('/api/land-freight', methods=['GET'])
 def get_land_freight():
-    """陆运费推荐接口 — 根据发货工厂/始发港/运输方式推荐陆运费"""
+    """陆运费推荐接口 — 根据发货工厂/始发港/运输方式/箱型推荐最便宜承运商"""
     factory = request.args.get('factory', '')
     origin_port = request.args.get('originPort', '')
     transport_mode = request.args.get('transportMode', 'direct')
@@ -1418,79 +1407,15 @@ def get_land_freight():
     if not origin_port:
         return jsonify({'error': '缺少 originPort 参数'}), 400
 
-    mode_cn = TRANSPORT_MODE_MAP.get(transport_mode, transport_mode)
     bt = str(box_type).strip().upper()
+    mode_cn = route_pricing.TRANSPORT_MODE_CN.get(transport_mode, transport_mode)
 
-    xl = _load_route_pricing_data()
-    if xl is None:
-        return jsonify({'success': False, 'error': '各路线报价卡文件未找到'}), 500
-
-    sheet_name = _find_route_sheet(xl, factory, origin_port)
-    if sheet_name is None:
+    result = route_pricing.query_land_freight(factory, origin_port, transport_mode, box_type)
+    if result is None:
         return jsonify({
             'success': False,
-            'error': f'未找到匹配的路线报价 Sheet: 工厂={factory}, 港口={origin_port}',
+            'error': f'未找到匹配: 工厂={factory}, 港口={origin_port}, 运输={mode_cn}, 箱型={bt}',
         }), 404
-
-    try:
-        df = pd.read_excel(xl, sheet_name=sheet_name)
-    except Exception as e:
-        return jsonify({'success': False, 'error': f'读取 Sheet 失败: {str(e)}'}), 500
-
-    if df.empty or df.shape[1] < 5:
-        return jsonify({'success': False, 'error': f'Sheet [{sheet_name}] 数据为空'}), 404
-
-    # 列结构: 0=运输方式, 1=公司, 2=箱型, 3=样本数, 4=陆运费中位数(元)
-    #         5=高速费中位数(元), 6=陆运+高速中位数(元), 7=陆运+高速均值(元)
-    col_mode = df.columns[0]
-    col_box = df.columns[2]
-    col_land_median = df.columns[4]
-    col_toll_median = df.columns[5]
-
-    # 按运输方式筛选
-    mode_mask = df[col_mode].astype(str).str.strip() == mode_cn
-    mode_matched = df[mode_mask]
-
-    if mode_matched.empty:
-        mode_mask = df[col_mode].astype(str).str.contains(mode_cn, na=False)
-        mode_matched = df[mode_mask]
-
-    if mode_matched.empty:
-        all_modes = df[col_mode].dropna().unique().tolist()
-        return jsonify({
-            'success': False,
-            'error': f'Sheet [{sheet_name}] 中未找到运输方式 [{mode_cn}]，可用: {all_modes}',
-        }), 404
-
-    # 按箱型筛选；无匹配时放宽
-    box_mask = mode_matched[col_box].astype(str).str.strip().str.upper() == bt
-    if box_mask.any():
-        candidates = mode_matched[box_mask].copy()
-    else:
-        candidates = mode_matched.copy()
-
-    if candidates.empty:
-        return jsonify({
-            'success': False,
-            'error': f'Sheet [{sheet_name}] 中未找到运输方式[{mode_cn}]箱型[{bt}]的数据',
-        }), 404
-
-    # 取 陆运费中位数(元) 最小的行
-    best_idx = candidates[col_land_median].idxmin()
-    best_row = candidates.loc[best_idx]
-    best_land_fee = float(best_row[col_land_median])
-    best_toll_fee = float(best_row[col_toll_median]) if pd.notna(best_row[col_toll_median]) else 0
-
-    candidates_sorted = candidates.sort_values(col_land_median)
-    all_quotes = []
-    for _, row in candidates_sorted.head(20).iterrows():
-        all_quotes.append({
-            'carrier': str(row.get(df.columns[1], '')) if df.shape[1] > 1 else '',
-            'boxType': str(row.get(col_box, '')),
-            'sampleCount': int(row.get(df.columns[3], 0)) if df.shape[1] > 3 and pd.notna(row.get(df.columns[3])) else 0,
-            'landFreightMedian': float(row.get(col_land_median, 0)) if pd.notna(row.get(col_land_median)) else 0,
-            'tollFreightMedian': float(row.get(col_toll_median, 0)) if pd.notna(row.get(col_toll_median)) else 0,
-        })
 
     return jsonify({
         'success': True,
@@ -1500,14 +1425,31 @@ def get_land_freight():
             'transportMode': transport_mode,
             'transportModeCn': mode_cn,
             'boxType': bt,
-            'sheetName': sheet_name,
-            'recommendedLandFreight': round(best_land_fee, 2),
-            'recommendedTollFreight': round(best_toll_fee, 2),
-            'recommendedCarrier': str(best_row.get(df.columns[1], '')),
-            'sampleCount': int(best_row.get(df.columns[3], 0)) if pd.notna(best_row.get(df.columns[3])) else 0,
-            'allQuotes': all_quotes,
-            'totalMatched': len(candidates),
+            'recommendedLandFreight': round(result['recommended_fee'], 2),
+            'recommendedTollFreight': 0,
+            'recommendedCarrier': result['recommended_carrier'],
+            'sampleCount': result['sample_count'],
+            'allQuotes': result['all_quotes'],
+            'totalMatched': result['total_matched'],
             'fetchedAt': datetime.now().isoformat(),
         }
     })
+
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("物流运输路径智能优化 API 服务 v3")
+    print("基于7张核心数据表 + 规则/LLM双引擎")
+    print("=" * 60)
+    print(f"LLM 模式: {'启用 (' + config.LLM_MODEL + ')' if config.LLM_ENABLED else '未启用（使用规则引擎）'}")
+    print(f"监听地址: http://{config.HOST}:{config.PORT}")
+    print(f"数据源: {len(config.FILES)} 张Excel表")
+    print("=" * 60)
+
+    # 预加载
+    print("\n[预加载] 正在加载数据并构建知识库...")
+    get_engine()
+    print("[预加载] 完成\n")
+
+    app.run(host=config.HOST, port=config.PORT, debug=True)
 

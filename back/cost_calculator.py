@@ -7,6 +7,8 @@ import numpy as np
 from config import USD_TO_CNY, CNY_TO_USD, BOX_TYPE_VOLUME
 from knowledge_base import KnowledgeBase
 
+F_TERMS = ("FOB", "FCA", "FAS")
+
 
 class CostCalculator:
     """基于默认值 + 合约价的动态费用计算器"""
@@ -40,7 +42,7 @@ class CostCalculator:
         :param trade_term: 贸易条款
         :param box_type: 集装箱箱型（单箱型时的默认值）
         :param box_type_counts: 各箱型数量字典，如 {"40HQ": 5, "20GP": 3}（可选，支持多箱型）
-        :param contract_ocean_rate: 合约海运费 CNY/箱（v3：从合约信息导出0806查询得到）
+        :param contract_ocean_rate: 合约海运费 CNY/箱（v3：从海运费参考标准查询得到）
         :param contract_ocean_info: 合约海运费详细信息 dict（含carrier/currency/note等）
         :return: 费用明细字典
         """
@@ -96,16 +98,17 @@ class CostCalculator:
         calc_details.append(f"VGM费：{vgm_per_box}元/箱 × {actual_boxes}箱 = {vgm_fee}元")
         data_quality["vgm_fee"] = "fixed"
 
-        # 3. 舱单费（按单计算，固定）
-        manifest_fee = 55.0
+        # 3. 舱单费（按集装箱计算，每箱55元）
+        manifest_per_box = 55.0
+        manifest_fee = round(manifest_per_box * actual_boxes, 2)
         fee_items.append({
             "name": "舱单费",
             "category": "海管家费用",
             "amount_cny": manifest_fee,
             "amount_usd": round(manifest_fee * CNY_TO_USD, 2),
-            "basis": "固定费用（按单）",
+            "basis": f"单箱{manifest_per_box}元 × {actual_boxes}箱",
         })
-        calc_details.append(f"舱单费：固定55元/单")
+        calc_details.append(f"舱单费：{manifest_per_box}元/箱 × {actual_boxes}箱 = {manifest_fee}元")
         data_quality["manifest_fee"] = "fixed"
 
         # 4. ICS2费（欧盟入境申报费，仅欧洲国家）
@@ -126,17 +129,32 @@ class CostCalculator:
             calc_details.append(f"ICS2费：欧盟入境申报70元/单")
             data_quality["ics2_fee"] = "fixed"
 
-        # 5. 陆运费（拖车费，按距离×箱数计算，使用主要箱型计算单箱费率）
-        inland_per_box, inland_source = self._calculate_inland_rate(factory_name, origin_port, weight, primary_box_type)
-        inland_fee = round(inland_per_box * actual_boxes, 2)
+        # 5. 陆运费（拖车费）：单箱型按箱数计算，多箱型按各箱型费率分别累加
+        if is_multi_box:
+            inland_parts = []
+            inland_fee = 0
+            inland_sources = []
+            for bt, qty in box_type_counts.items():
+                bt_rate, bt_source = self._calculate_inland_rate(factory_name, origin_port, weight, bt)
+                bt_subtotal = round(bt_rate * qty, 2)
+                inland_fee += bt_subtotal
+                inland_parts.append(f"{bt} {bt_rate}元/箱×{qty}箱={bt_subtotal}元")
+                inland_sources.append(bt_source)
+            inland_per_box = round(inland_fee / actual_boxes, 2)
+            inland_basis = " + ".join(inland_parts)
+            inland_source = "excel_data" if "excel_data" in inland_sources else "fallback"
+        else:
+            inland_per_box, inland_source = self._calculate_inland_rate(factory_name, origin_port, weight, primary_box_type)
+            inland_fee = round(inland_per_box * actual_boxes, 2)
+            inland_basis = f"单箱{inland_per_box}元 × {actual_boxes}箱"
         fee_items.append({
             "name": "陆运费",
-            "category": "出口起运港拖车费",
+            "category": "工厂到起运港拖车费",
             "amount_cny": inland_fee,
             "amount_usd": round(inland_fee * CNY_TO_USD, 2),
-            "basis": f"单箱{inland_per_box}元 × {actual_boxes}箱",
+            "basis": inland_basis,
         })
-        calc_details.append(f"陆运费：{inland_per_box}元/箱 × {actual_boxes}箱 = {inland_fee}元")
+        calc_details.append(f"陆运费：{inland_basis} = {inland_fee}元")
         data_quality["inland_fee"] = inland_source
 
         # 6. 报关费（按单计算，固定，截断处理）
@@ -174,24 +192,25 @@ class CostCalculator:
             ocean_source = "default" if "default" in ocean_sources else ("global_stats" if "global_stats" in ocean_sources else "historical")
 
         ocean_fee = round(ocean_fee, 2)
-        # 海运费始终计入总费用（用于路线对比），不受贸易条款限制
-        if contract_ocean_rate > 0 and contract_ocean_info:
-            carrier = contract_ocean_info.get("carrier", "")
-            currency = contract_ocean_info.get("currency", "USD")
-            rate_usd = contract_ocean_info.get("rate_usd", 0)
-            ocean_basis = f"合约报价 {carrier} {currency} {rate_usd}/箱 × {actual_boxes}箱 = ¥{ocean_fee}"
-        else:
-            ocean_basis = " + ".join([f"{bt} {self._calculate_ocean_rate(dest_country, origin_port, bt)[0]}元/箱×{qty}箱" for bt, qty in box_type_counts.items()])
+        if trade_term not in F_TERMS:
+            # F条款不包含海运费，FOB/FCA/FAS成本中不计算海运费
+            if contract_ocean_rate > 0 and contract_ocean_info:
+                carrier = contract_ocean_info.get("carrier", "")
+                currency = contract_ocean_info.get("currency", "USD")
+                rate_usd = contract_ocean_info.get("rate_usd", 0)
+                ocean_basis = f"合约报价 {carrier} {currency} {rate_usd}/箱 × {actual_boxes}箱 = ¥{ocean_fee}"
+            else:
+                ocean_basis = " + ".join([f"{bt} {self._calculate_ocean_rate(dest_country, origin_port, bt)[0]}元/箱×{qty}箱" for bt, qty in box_type_counts.items()])
 
-        fee_items.append({
-            "name": "海运费" + ("（多箱型合计）" if is_multi_box else "") + ("（合约价）" if ocean_source == "contract" else ""),
-            "category": "出口海运费",
-            "amount_cny": ocean_fee,
-            "amount_usd": round(ocean_fee * CNY_TO_USD, 2),
-            "basis": ocean_basis if is_multi_box or ocean_source == "contract" else f"单箱{ocean_fee/actual_boxes:.0f}元 × {actual_boxes}箱",
-        })
-        calc_details.append(f"海运费：{' + '.join(ocean_details_parts)} = {ocean_fee}元")
-        data_quality["ocean_fee"] = ocean_source
+            fee_items.append({
+                "name": "海运费" + ("（多箱型合计）" if is_multi_box else "") + ("（合约价）" if ocean_source == "contract" else ""),
+                "category": "出口海运费",
+                "amount_cny": ocean_fee,
+                "amount_usd": round(ocean_fee * CNY_TO_USD, 2),
+                "basis": ocean_basis if is_multi_box or ocean_source == "contract" else f"单箱{ocean_fee/actual_boxes:.0f}元 × {actual_boxes}箱",
+            })
+            calc_details.append(f"海运费：{' + '.join(ocean_details_parts)} = {ocean_fee}元")
+            data_quality["ocean_fee"] = ocean_source
 
         # 8. 保险费（仅CIF，基于海运费计算）
         if trade_term == "CIF":
@@ -225,8 +244,9 @@ class CostCalculator:
 
         # 综合数据质量评估
         key_sources = [data_quality.get("port_fee", "default"),
-                       data_quality.get("inland_fee", "default"),
-                       data_quality.get("ocean_fee", "default")]
+                       data_quality.get("inland_fee", "default")]
+        if trade_term not in F_TERMS:
+            key_sources.append(data_quality.get("ocean_fee", "default"))
         if all(s in ("historical", "contract") for s in key_sources):
             overall_quality = "high"  # 关键费用项均有真实数据
         elif "contract" in key_sources:
@@ -279,46 +299,45 @@ class CostCalculator:
 
     def _calculate_inland_rate(self, factory_name, origin_port, weight, box_type):
         """
-        计算单箱陆运费率
-        基于工厂到港口的距离、重量、箱型综合评估
+        计算单箱陆运费率 — 从工厂到起运港拖车费 Excel 实时查询
 
-        返回: (rate, source) — source: 'estimated'（有工厂距离系数）/ 'default'（未知工厂用默认系数）
+        返回: (rate, source) — source: 'excel_data' / 'fallback'
         """
-        # 基础费率（根据始发港）
+        from route_pricing import query_land_freight
+
+        # 从Excel数据查询
+        result = query_land_freight(factory_name, origin_port, 'direct', box_type)
+        if result and result['recommended_fee'] > 0:
+            rate = round(result['recommended_fee'], 2)
+            return rate, 'excel_data'
+
+        # 回退：基础费率（仅当Excel数据不可用时）
         port_base_rates = {
-            "青岛/QINGDAO": 2200,
-            "上海/SHANGHAI": 1800,
-            "宁波/NINGBO": 2000,
-            "天津/TIANJIN": 2100,
+            "青岛/QINGDAO": 3700,
+            "上海/SHANGHAI": 7000,
+            "宁波/NINGBO": 3500,
+            "天津/TIANJIN": 3500,
             "海防/HAIPHONG": 1200,
             "勿拉湾/BELAWAN": 1500,
         }
-        base_rate = port_base_rates.get(origin_port, 2000)
+        base_rate = port_base_rates.get(origin_port, 3500)
 
-        # 工厂距离调整（内陆工厂加价）
         distance_adj, distance_known = self._get_factory_distance_adjustment(factory_name, origin_port)
 
-        # 重量调整（超重加价）
         weight_adj = 1.0
         if weight > 20000:
             weight_adj = 1.1
         elif weight > 15000:
             weight_adj = 1.05
 
-        # 箱型调整
         box_type_adj = {
-            "20GP": 0.8,
-            "20HQ": 0.85,
-            "40GP": 1.0,
-            "40HQ": 1.05,
-            "40HC": 1.05,
-            "40NOR": 1.0,
-            "45HQ": 1.15,
+            "20GP": 0.8, "20HQ": 0.85, "40GP": 1.0, "40HQ": 1.05,
+            "40HC": 1.05, "40NOR": 1.0, "45HQ": 1.15,
         }
         type_adj = box_type_adj.get(box_type, 1.0)
 
         rate = round(base_rate * distance_adj * weight_adj * type_adj, 2)
-        source = "estimated" if distance_known else "default"
+        source = "fallback" if distance_known else "fallback_default"
         return rate, source
 
     def _get_factory_distance_adjustment(self, factory_name, origin_port):
@@ -409,7 +428,7 @@ class CostCalculator:
         """
         计算单箱海运费率（基于历史数据动态计算）
 
-        返回: (rate, source) — source: 'historical'（航线历史费率）/ 'global_stats'（海运费收入表中位数）/ 'default'
+        返回: (rate, source) — source: 'historical'（航线历史费率）/ 'global_stats'（海运费参考标准）/ 'default'
         """
         # 1. 查找该航线的历史费率
         route_key = (origin_port, dest_country)
@@ -418,7 +437,7 @@ class CostCalculator:
             base_rate = route_data['median']
             source = "historical"
         else:
-            # 2. 查找海运费收入表的中位数
+            # 2. 查找海运费参考标准的中位数
             if '海运费' in self.shipping_rates:
                 base_rate = self.shipping_rates['海运费']
                 source = "global_stats"

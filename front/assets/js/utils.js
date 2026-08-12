@@ -17,12 +17,15 @@ export function isEuropeanCountry(country) {
     return EUROPEAN_COUNTRIES.indexOf(country) >= 0;
 }
 
+export function isFTradeTerm(term) {
+    var t = String(term || '').trim().toUpperCase();
+    return t === 'FOB' || t === 'FCA' || t === 'FAS';
+}
+
 export function initDateDefaults() {
     const today = new Date();
     const in7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const in14Days = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
     store.form.cargoReady = formatDate(in7Days);
-    store.form.shipSchedule = formatDate(in14Days);
 }
 
 // 更新顶部结果状态栏（metaText 带 5 秒自动还原）
