@@ -35,8 +35,32 @@ from recommendation_engine import RecommendationEngine
 import route_pricing
 import db
 
+# ===== RAG 模块（可选加载，依赖缺失时不影响主服务） =====
+try:
+    from rag_engine import RagEngine
+    from rag_config import VECTOR_STORE_DIR
+    RAG_AVAILABLE = True
+    RAG_IMPORT_ERROR = ""
+    RAG_STORE_DIR = str(VECTOR_STORE_DIR)
+except Exception as _rag_exc:
+    RAG_AVAILABLE = False
+    RAG_IMPORT_ERROR = str(_rag_exc)
+    RAG_STORE_DIR = ""
+
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "front"), static_url_path="")
 CORS(app, origins=config.CORS_ORIGINS)
+
+# ===== RAG 全局状态 =====
+rag_engine = None
+rag_init_error = ""
+rag_qa_history = []
+RAG_DEFAULT_SUGGESTIONS = [
+    "美国线一般哪家船公司比较便宜？",
+    "安庆英科医疗的默认起运港是哪里？",
+    "40HQ到洛杉矶的历史推荐总费用大概多少？",
+    "丁腈手套通常从哪些工厂发货？",
+    "最近的历史推荐中，有哪些方案满足到货时间？",
+]
 
 # 全局实例
 engine = None
@@ -76,6 +100,105 @@ def health_check():
         'data_sources': 7,
         'timestamp': datetime.now().isoformat(),
     })
+
+
+def _get_rag_engine(rebuild=False):
+    """懒加载 RAG 引擎，首次请求时初始化向量库"""
+    global rag_engine, rag_init_error
+    if not RAG_AVAILABLE:
+        raise RuntimeError(f"RAG 模块不可用：{RAG_IMPORT_ERROR}")
+    if rag_engine is None:
+        rag_engine = RagEngine()
+    try:
+        if rebuild or rag_engine.index is None:
+            rag_engine.initialize(rebuild=rebuild)
+        rag_init_error = ""
+    except Exception as e:
+        rag_init_error = str(e)
+        raise
+    return rag_engine
+
+
+@app.route('/rag')
+def rag_page():
+    """RAG 智能问答页面"""
+    return app.send_static_file('rag.html')
+
+
+@app.route('/api/rag/status', methods=['GET'])
+def rag_status():
+    """RAG 索引状态"""
+    try:
+        engine = _get_rag_engine()
+        data = dict(engine.status)
+        data['available'] = RAG_AVAILABLE
+        data['history_count'] = len(rag_qa_history)
+        data['vector_store'] = RAG_STORE_DIR
+        data['llm_model'] = config.LLM_MODEL if config.LLM_ENABLED else ''
+        if rag_init_error:
+            data['error'] = rag_init_error
+        return jsonify({'success': True, 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/rag/ask', methods=['POST'])
+def rag_ask():
+    """RAG 问答"""
+    payload = request.get_json(silent=True) or {}
+    question = (payload.get('question') or '').strip()
+    if not question:
+        return jsonify({'success': False, 'error': '问题不能为空'}), 400
+    try:
+        engine = _get_rag_engine()
+        answer, sources = engine.ask(question, top_k=int(payload.get('top_k') or 6))
+        item = {
+            'question': question,
+            'answer': answer,
+            'sources': sources,
+            'created_at': datetime.now().isoformat(),
+        }
+        rag_qa_history.append(item)
+        return jsonify({'success': True, 'data': item})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/rag/history', methods=['GET'])
+def rag_history():
+    """RAG 问答历史"""
+    return jsonify({'success': True, 'data': rag_qa_history})
+
+
+@app.route('/api/rag/history/clear', methods=['POST'])
+def rag_history_clear():
+    """清空 RAG 问答历史"""
+    rag_qa_history.clear()
+    return jsonify({'success': True})
+
+
+@app.route('/api/rag/rebuild', methods=['POST'])
+def rag_rebuild():
+    """重建 RAG 向量库"""
+    try:
+        engine = _get_rag_engine(rebuild=True)
+        return jsonify({'success': True, 'data': engine.status})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/rag/suggestions', methods=['GET'])
+def rag_suggestions():
+    """RAG 推荐问题"""
+    recent = [(x.get('question') or '').strip() for x in rag_qa_history[-3:] if x.get('question')]
+    dynamic = [f"请进一步解释：{q}" for q in recent] + [f"请给出与“{q}”相关的数据来源" for q in recent]
+    suggestions = []
+    seen = set()
+    for s in RAG_DEFAULT_SUGGESTIONS + dynamic:
+        if s not in seen:
+            seen.add(s)
+            suggestions.append(s)
+    return jsonify({'success': True, 'data': suggestions[:10]})
 
 
 @app.route('/api/register', methods=['POST'])

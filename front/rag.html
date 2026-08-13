@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>物流智能问答助手</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="assets/css/base.css">
+<link rel="stylesheet" href="assets/css/rag.css">
+</head>
+<body class="rag-page">
+  <header class="rag-header">
+    <div class="rag-header-inner">
+      <div class="rag-brand">
+        <span class="rag-brand-mark">RAG</span>
+        <div>
+          <div class="rag-brand-title">物流智能问答助手</div>
+          <div class="rag-brand-sub">Logistics Knowledge Assistant</div>
+        </div>
+      </div>
+      <a class="rag-back" href="logistics-optimizer.html">返回物流优化</a>
+    </div>
+  </header>
+
+  <main class="rag-main">
+    <section class="rag-hero">
+      <div class="rag-kicker">RAG KNOWLEDGE ASSISTANT</div>
+      <h1>基于物流知识库的智能问答</h1>
+      <p>检索工厂、港口、海运费率、历史推荐记录等资料，回答你的物流问题。</p>
+      <div class="rag-status">
+        <span class="rag-status-dot" id="statusDot"></span>
+        <span id="ragStatusText">正在初始化...</span>
+        <span id="ragStats" class="rag-stats"></span>
+      </div>
+    </section>
+
+    <section class="rag-chat-card">
+      <div class="rag-chat-head">
+        <div class="rag-chat-title">
+          <strong>智能助手</strong>
+          <span>仅基于已索引资料回答，不编造数据</span>
+        </div>
+        <div class="rag-chat-actions">
+          <button type="button" id="clearBtn" class="rag-btn ghost">清空记录</button>
+          <button type="button" id="rebuildBtn" class="rag-btn ghost">重建索引</button>
+        </div>
+      </div>
+      <div id="qaList" class="rag-qa-list"></div>
+      <div id="suggestions" class="rag-suggestions"></div>
+      <form id="askForm" class="rag-ask-form">
+        <input id="questionInput" type="text" placeholder="例如：美国线哪家船公司最便宜？" autocomplete="off">
+        <button type="submit" id="askBtn" class="rag-btn primary">提问</button>
+      </form>
+    </section>
+  </main>
+
+  <script type="module" src="assets/js/rag.js"></script>
+</body>
+</html>

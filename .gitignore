@@ -8,3 +8,5 @@ __pycache__/
 raw-front/
 html.diff
 js.diff
+data/vector_store_faiss/
+back/rag_server.*.log

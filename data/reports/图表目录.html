@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>物流路径优化 - 图表目录</title>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; max-width: 980px; margin: 30px auto; padding: 0 20px; color: #222; background: #fafafa; }
+  h1 { color: #2E6CA4; border-bottom: 2px solid #2E6CA4; padding-bottom: 8px; }
+  h2 { color: #2E6CA4; margin-top: 36px; }
+  .card { background: white; border: 1px solid #e0e0e0; border-radius: 6px; padding: 16px 20px; margin: 16px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .card img { max-width: 100%; height: auto; display: block; margin: 8px auto; border: 1px solid #eee; }
+  .meta { font-size: 12px; color: #777; margin-bottom: 8px; }
+  .desc { font-size: 14px; line-height: 1.6; margin-top: 8px; }
+  .note { background: #fff8e1; border-left: 3px solid #E08A2B; padding: 8px 12px; font-size: 12px; color: #555; margin-top: 8px; }
+  .toc { background: white; border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px 20px; }
+  .toc a { color: #2E6CA4; text-decoration: none; line-height: 1.9; display: block; }
+  .toc a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>物流运输路径优化 — 数据分析图表目录</h1>
+<p>基于公司提供的历史运输数据（拖车费、港杂费、海运费、运抵国与目的港、时效分析、工厂分配规则等）。本目录为课题"数据分析图表及汇报材料"的成果汇总。</p>
+
+<div class="toc">
+  <strong>图表索引</strong>
+  <a href="#c1">图1 运抵国 TOP10（运单数）</a>
+  <a href="#c2">图2 目的港 TOP15（运单数）</a>
+  <a href="#c3">图3 运输方式占比</a>
+  <a href="#c4">图4 工厂→港口 建议标准时效</a>
+  <a href="#c5">图5 主要起运港 港杂费（40HQ, FOB）</a>
+  <a href="#c6">图6 成本构成示例（青岛→汉堡）</a>
+  <a href="#c7">图7 单厂路线 直拖 vs 海铁 拖车费对比</a>
+  <a href="#c8">图8 改海铁相对直拖的成本差额</a>
+  <a href="#c9">图9 起运港 港杂费 vs 直拖拖车费</a>
+  <a href="#c10">图10 四种运输方式 拖车费中位数</a>
+  <a href="#c11">图11 路径优化示例：至汉堡 候选路线总成本</a>
+  <a href="#c12">图12 时效样本量分布（数据质量信号）</a>
+</div>
+
+<div class="card" id="c1"><div class="meta">图1 ｜ 数据源：运抵国与目的港</div><img src="../charts/01_arrival_countries.png" alt=""><div class="desc">运抵国 TOP10 运单分布，覆盖 122 个国家、共 14618 运单。整体呈现以德国、美国、荷兰、加拿大为核心目的地的出口格局。</div></div>
+
+<div class="card" id="c2"><div class="meta">图2 ｜ 数据源：运抵国与目的港</div><img src="../charts/02_dest_ports.png" alt=""><div class="desc">目的港 TOP15。汉堡（1067）、洛杉矶（836）、鹿特丹（657）、纽约（613）、多伦多（428）为前五位目的港，合计占比超过半数。</div></div>
+
+<div class="card" id="c3"><div class="meta">图3 ｜ 数据源：时效分析表_运输方式总览</div><img src="../charts/03_mode_share.png" alt=""><div class="desc">运输方式样本占比。直拖占主导、海铁为重要补充，陆改水与工厂自运占比较小，反映公司当前以公路直拖为主的运输结构。</div></div>
+
+<div class="card" id="c4"><div class="meta">图4 ｜ 数据源：工厂到起运港时效分析表_工厂×港口汇总</div><img src="../charts/04_transit_time.png" alt=""><div class="desc">工厂到港口的运输时效（中位数）。绿色为样本充足路线（n>10），橙色为小样本（n≤10）需谨慎使用。安徽英科→青岛（2604 样本）建议 9.1 天为系统基线。</div></div>
+
+<div class="card" id="c5"><div class="meta">图5 ｜ 数据源：港杂费标准_贸易条款汇总（40HQ FOB 中位数）</div><img src="../charts/05_port_fee.png" alt=""><div class="desc">主要起运港的港杂费基准。连云港 5014 最高、海防 2710 最低，最大极差 2304 CNY/柜，是路径选择中的关键变量。</div></div>
+
+<div class="card" id="c6"><div class="meta">图6 ｜ 数据源：成本模型计算结果</div><img src="../charts/06_cost_stack.png" alt=""><div class="desc">单柜总成本构成示例：山东英科医疗科技 → 青岛 → 汉堡，40HQ、直拖方式。总成本 18244 CNY，其中海运费占 75%。</div></div>
+
+<div class="card" id="c7"><div class="meta">图7 ｜ 数据源：拖车费透视_单厂路线</div><img src="../charts/07_truck_compare.png" alt=""><div class="desc">单厂路线 直拖 vs 海铁 的拖车费对比。可见对长距离内陆工厂（安徽、安庆、江西），海铁拖车费显著低于直拖。</div></div>
+
+<div class="card" id="c8"><div class="meta">图8 ｜ 数据源：拖车费透视_单厂路线</div><img src="../charts/08_mode_save.png" alt=""><div class="desc">改海铁相对直拖的成本差额（绿色=海铁更省；红色=直拖更省）。对安徽英科→上海可节省 3350 CNY，对安徽英科→宁波反而多 4600 CNY。</div></div>
+
+<div class="card" id="c9"><div class="meta">图9 ｜ 数据源：港杂费标准 + 拖车费透视</div><img src="../charts/09_port_comprehensive.png" alt=""><div class="desc">起运港 港杂费 与 直拖拖车费 的并列对比。便于在选择起运港时综合权衡两段费用。</div></div>
+
+<div class="card" id="c10"><div class="meta">图10 ｜ 数据源：拖车费透视</div><img src="../charts/10_mode_cost.png" alt=""><div class="desc">四种运输方式的拖车费中位数对比。陆改水最低、工厂自运次之、直拖与海铁在长距离路线上的差异需要按路线分别评估。</div></div>
+
+<div class="card" id="c11"><div class="meta">图11 ｜ 数据源：成本模型（至汉堡）</div><img src="../charts/11_path_opt.png" alt=""><div class="desc">路径优化示例：至汉堡的候选路线总成本。前 8 名差距在 600 CNY 以内，建议结合时效与舱位综合选择。</div></div>
+
+<div class="card" id="c12"><div class="meta">图12 ｜ 数据源：时效分析表_工厂×港口汇总</div><img src="../charts/12_data_quality.png" alt=""><div class="desc">时效样本量分布。n≤3 的路线有 9 条，可靠性不足；建议系统标记"低置信度"并月度复核补样。</div><div class="note">注：本图为数据质量信号汇总，是后续系统持续优化的重要依据。</div></div>
+
+<div class="card"><h3 style="color:#2E6CA4;margin-top:0">配套 Word 报告</h3>
+<ol>
+  <li>《国际物流运输路径分析报告》</li>
+  <li>《运输成本分析模型》</li>
+  <li>《港口及运输方式对比分析》</li>
+  <li>《物流路径优化方案》</li>
+  <li>《运输优化建议》</li>
+</ol>
+<p style="font-size:12px;color:#666">所有数值均来源于所提供的 Excel 数据；唯一设定参数为海运费 USD→CNY 汇率 7.1（系统当前固定值，可在面板"其他费用"中调整）。</p>
+</div>
+
+</body>
+</html>

@@ -63,5 +63,13 @@
 .panel-header .icon-wrap svg{width:18px;height:18px;color:var(--accent)}
 .panel-header h2{font-family:var(--font-display);font-size:1.05rem;font-weight:600;color:var(--ink)}
 .panel-header .sub{font-size:0.7rem;color:var(--muted);margin-left:auto;font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase}
+.panel-header .rag-meta-btn{
+  display:inline-flex;align-items:center;gap:0.35rem;
+  padding:0.32rem 0.65rem;border-radius:4px;text-decoration:none;
+  background:var(--accent-muted);color:var(--accent);
+  border:1px solid rgba(37,99,235,0.22);text-transform:none;letter-spacing:0;
+}
+.panel-header .rag-meta-btn svg{width:14px;height:14px}
+.panel-header .rag-meta-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
 .panel-body{padding:1.6rem}
 
