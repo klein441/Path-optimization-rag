@@ -14,12 +14,9 @@ BASE_DIR = _BASE_DIR
 DATA_DIR = os.path.join(_ROOT_DIR, "data")
 
 # ===== 数据源文件路径 =====
-# 基础数据文件（实际存在于 data 目录）
+# 当前仅使用《工厂分配区间规则》
 FILES = {
-    # 1. 各基地产能 — 工厂PVC/丁腈手套产能数据
-    "factory_capacity": os.path.join(DATA_DIR, "各基地产能.xlsx"),
-    # 2. 各工厂最大订单数 — 工厂产能+产品类型数据（原物料行已清洗合并至此）
-    "material_line": os.path.join(DATA_DIR, "各工厂最大订单数.xlsx"),
+    "allocation_rules": os.path.join(DATA_DIR, "工厂分配区间规则.xlsx"),
 }
 
 # ===== LLM 配置 =====
@@ -140,8 +137,8 @@ ROUTE_PRICING_FILE = os.path.join(DATA_DIR, "工厂到起运港拖车费_运输�
 # 运抵国与目的港映射表 — 用于前端运抵国/终到港下拉联动
 COUNTRY_DEST_PORT_FILE = os.path.join(DATA_DIR, "运抵国与目的港.xlsx")
 
-# 各工厂最大订单数 — 用于产能过滤（工厂选择的第一道门槛）
-FACTORY_MAX_ORDERS_FILE = os.path.join(DATA_DIR, "各工厂最大订单数.xlsx")
+# 工厂分配区间规则 — 发货工厂选择的依据（表格箱数 = 千支）
+FACTORY_ALLOCATION_FILE = os.path.join(DATA_DIR, "工厂分配区间规则.xlsx")
 
 # ===== 国内始发港（11个）用于海运费比价选出最优5港 =====
 # 中文名 → 标准格式（中文/英文），用于合约匹配和费用计算
@@ -159,11 +156,16 @@ DOMESTIC_ORIGIN_PORTS = {
     "天津": "天津/TIANJIN",
 }
 
-# 工厂最大订单数 → 内部工厂名映射（各工厂最大订单数.xlsx 公司列 → FACTORY_SHORT keys）
-FACTORY_MAX_ORDER_NAME_MAP = {
-    "山东英科医疗制品有限公司（潍坊）": "山东英科医疗制品有限公司",
-    "英科医疗科技股份有限公司（淄博）": "英科医疗科技股份有限公司",
-    "安徽英科医疗用品有限公司（淮北）": "安徽英科医疗用品有限公司",
-    "江西英科医疗有限公司": "江西英科医疗有限公司",
-    "安庆英科医疗有限公司": "安庆英科医疗有限公司",
+# 工厂分配区间规则中的工厂名 → 系统内部工厂名
+FACTORY_ALLOCATION_NAME_MAP = {
+    "淮北PVC": "安徽英科医疗用品有限公司",
+    "淮北丁腈": "安徽英科医疗用品有限公司",
+    "青州PVC": "山东英科医疗制品有限公司",
+    "青州丁腈": "山东英科医疗制品有限公司",
+    "淄博PVC": "英科医疗科技股份有限公司",
+    "江西丁腈": "江西英科医疗有限公司",
+    "安庆丁腈": "安庆英科医疗有限公司",
+    "清化丁腈": "BASIC INTERNATIONAL VIET NAM CO..LTD",
+    "张店PE": "山东英科医疗科技有限公司",
+    "广宁PE": "BASIC INTERNATIONAL VIET NAM CO..LTD",
 }

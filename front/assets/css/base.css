@@ -1,6 +1,12 @@
 /* ===== Google Fonts ===== */
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Source+Sans+3:wght@400;500;600&display=swap');
 
+@font-face{
+  font-family:'NumericYaHei';
+  src:local('Microsoft YaHei'),local('微软雅黑');
+  unicode-range:U+0030-0039,U+002E,U+002C,U+0025,U+002B,U+002D;
+}
+
 /* ===== Design Tokens — Tech Blue System ===== */
 :root{
   --bg:#F7FAFF;
@@ -28,9 +34,9 @@
   --shadow-md:0 4px 16px rgba(26,26,26,0.06),0 2px 6px rgba(26,26,26,0.04);
   --shadow-lg:0 12px 40px rgba(26,26,26,0.08),0 4px 12px rgba(26,26,26,0.05);
   --shadow-accent:0 4px 16px rgba(37,99,235,0.18),0 2px 6px rgba(37,99,235,0.1);
-  --font-display:'Playfair Display',Georgia,'Times New Roman',serif;
-  --font-body:'Source Sans 3','PingFang SC','Microsoft YaHei',sans-serif;
-  --font-mono:'Microsoft YaHei','微软雅黑',sans-serif;
+  --font-display:'NumericYaHei','Playfair Display',Georgia,'Times New Roman',serif;
+  --font-body:'NumericYaHei','Source Sans 3','PingFang SC','Microsoft YaHei',sans-serif;
+  --font-mono:'NumericYaHei','Microsoft YaHei','微软雅黑',sans-serif;
 }
 
 /* ===== Reset & Base ===== */

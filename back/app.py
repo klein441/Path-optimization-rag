@@ -78,6 +78,56 @@ def health_check():
     })
 
 
+@app.route('/api/register', methods=['POST'])
+def register_user_api():
+    """用户注册：写入 MySQL logistics_users 表"""
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    confirm_password = data.get('confirmPassword') or ''
+
+    if not username or not password or not confirm_password:
+        return jsonify({'success': False, 'error': '请填写用户名、密码和确认密码'}), 400
+    if password != confirm_password:
+        return jsonify({'success': False, 'error': '两次输入的密码不一致'}), 400
+    if len(password) < 6:
+        return jsonify({'success': False, 'error': '密码长度至少6位'}), 400
+
+    try:
+        if db.DB_ENABLED:
+            db.safe_init_db()
+        result = db.register_user(username, password)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'注册失败: {e}'}), 500
+    if result.get('ok'):
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': result.get('error', '注册失败')}), 400
+
+
+@app.route('/api/login', methods=['POST'])
+def login_user_api():
+    """用户登录：从 MySQL 校验用户名和密码"""
+    data = request.get_json(silent=True) or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not username or not password:
+        return jsonify({'success': False, 'error': '请输入用户名和密码'}), 400
+
+    try:
+        if db.DB_ENABLED:
+            db.safe_init_db()
+            ok = db.verify_user(username, password)
+        else:
+            ok = (username == 'admin' and password == 'admin123')
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'登录失败: {e}'}), 500
+
+    if ok:
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': '用户名或密码错误'}), 401
+
+
 @app.route('/api/logistics/knowledge', methods=['GET'])
 def get_knowledge():
     """获取知识库摘要"""
@@ -204,6 +254,35 @@ def recommend():
         return jsonify({'error': f'推荐生成失败: {str(e)}'}), 500
 
 
+@app.route('/api/recommendation/confirm', methods=['POST'])
+def confirm_recommendation_fees():
+    """Save the frontend-confirmed fee total back to the latest matching log row."""
+    data = request.get_json(silent=True) or {}
+    payload = data.get('payload') or {}
+    total = data.get('total')
+    items = data.get('items')
+    if not isinstance(payload, dict) or total is None:
+        return jsonify({'success': False, 'error': '缺少 payload 或 total 参数'}), 400
+
+    try:
+        total_cny = float(total)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'total 不是有效数字'}), 400
+
+    updated = db.safe_update_recommendation_total(
+        payload,
+        total_cny,
+        items if isinstance(items, list) else None,
+    )
+    return jsonify({
+        'success': True,
+        'data': {
+            'updated': updated,
+            'totalCny': round(total_cny, 2),
+        },
+    })
+
+
 def _format_primary(p, full_result):
     """格式化主方案为前端友好格式"""
     cost = p.get('cost', {})
@@ -308,10 +387,13 @@ def _format_alt(a):
         'totalCostUsd': cost.get('total_usd', 0),
         'carrier': a.get('carrier', {}),
         'shippingLine': a.get('shippingLine', {}),
+        'shippingLines': a.get('shippingLines', {}),
+        'factoryInfo': a.get('factoryInfo', {}),
         'oceanFreightInfo': a.get('oceanFreightInfo', {}),
         'isOverseas': a.get('region', '') == '海外',
         'pricingSource': a.get('pricingSource', 'rule_engine'),
         'dataQuality': a.get('dataQuality', 'medium'),
+        'needFDA': a.get('needFDA', False),
     }
 
 

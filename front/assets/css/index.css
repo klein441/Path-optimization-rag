@@ -22,7 +22,7 @@
 
 #login-overlay .bg {
     width: 415px;
-    height: 337px;
+    height: 390px;
     background: #fff;
     position: absolute;
     left: 0;
@@ -55,6 +55,32 @@
     text-indent: 0;
     cursor: pointer;
     font-size: 16px;
+}
+
+#login-overlay .btn.login-register-btn {
+    top: 19.2rem;
+}
+
+#login-overlay.register-mode .bg {
+    height: 440px;
+}
+
+#login-overlay.register-mode .confirm {
+    position: absolute;
+    top: 13rem;
+    right: 3.5rem;
+    display: flex;
+}
+
+#login-overlay.register-mode .btn.register-submit-btn {
+    top: 16.5rem;
+}
+
+#login-overlay.register-mode .btn.back-login-btn {
+    top: 19.5rem;
+    background: #fff;
+    color: #2D456B;
+    border: 1px solid #2D456B;
 }
 
 #login-overlay .img {
@@ -176,5 +202,21 @@
     #login-overlay .btn {
         top: 14rem;
         width: 15rem;
+    }
+    #login-overlay .btn.login-register-btn {
+        top: 17rem;
+    }
+    #login-overlay.register-mode .bg {
+        height: 395px;
+    }
+    #login-overlay.register-mode .confirm {
+        top: 11.5rem;
+        right: 3.5rem;
+    }
+    #login-overlay.register-mode .btn.register-submit-btn {
+        top: 15rem;
+    }
+    #login-overlay.register-mode .btn.back-login-btn {
+        top: 17.5rem;
     }
 }

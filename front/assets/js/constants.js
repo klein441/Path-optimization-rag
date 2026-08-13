@@ -16,7 +16,7 @@ export const TRANSPORT_MODE_FREIGHT = {
     landToWater:{ label: '陆改水',   baseFreight: 400, hasToll: false },
 };
 
-// ===== 集装箱箱型固定体积（m³）=====
+// ===== 集装箱柜型固定体积（m³）=====
 export const BOX_VOLUMES = {
     "20GP": 33.1, "20HQ": 33.1,
     "40GP": 67.5, "40HQ": 76.0, "40HC": 76.0,
@@ -30,11 +30,11 @@ export const PRODUCT_OPTIONS = [
     { value: 'PVC手套',  label: 'PVC手套' },
 ];
 
-// ===== 箱型选项（含展示标签）=====
+// ===== 柜型选项（含展示标签）=====
 export const BOX_TYPE_OPTIONS = [
-    { value: '20GP',  label: '20GP（20英尺标准箱 · 33.1m³）' },
+    { value: '20GP',  label: '20GP（20英尺标准柜 · 33.1m³）' },
     { value: '20HQ',  label: '20HQ（20英尺高柜 · 33.1m³）' },
-    { value: '40GP',  label: '40GP（40英尺标准箱 · 67.5m³）' },
+    { value: '40GP',  label: '40GP（40英尺标准柜 · 67.5m³）' },
     { value: '40HQ',  label: '40HQ（40英尺高柜 · 76m³）' },
     { value: '40HC',  label: '40HC（40英尺高柜 · 76m³）' },
     { value: '45HQ',  label: '45HQ（45英尺高柜 · 85m³）' },
@@ -47,7 +47,7 @@ export const EUROPEAN_COUNTRIES = [
     '瑞典', '芬兰', '丹麦', '奥地利', '爱尔兰', '葡萄牙', '希腊',
     '捷克', '罗马尼亚', '匈牙利', '斯洛文尼亚', '爱沙尼亚', '立陶宛',
     '克罗地亚', '拉脱维亚', '保加利亚', '斯洛伐克', '卢森堡', '马耳他',
-    '塞浦路斯', '挪威', '瑞士'
+    '塞浦路斯', '挪威', '瑞士', '冰岛', '列支敦士登'
 ];
 
 // ===== 始发港 → 工厂 回退映射 =====

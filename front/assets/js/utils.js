@@ -6,7 +6,10 @@ import { EUROPEAN_COUNTRIES, PROVINCE_PORT_MAP, PORT_FACTORY_MAP, FACTORY_SHORT_
 
 export function formatDate(d) {
     if (!d) return '';
-    return d.toISOString().split('T')[0];
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
 }
 
 export function formatFee(val) {
@@ -24,8 +27,10 @@ export function isFTradeTerm(term) {
 
 export function initDateDefaults() {
     const today = new Date();
-    const in7Days = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-    store.form.cargoReady = formatDate(in7Days);
+    const inOneMonth = new Date(today);
+    inOneMonth.setMonth(inOneMonth.getMonth() + 1);
+    store.form.cargoReady = formatDate(today);
+    store.form.requiredArrival = formatDate(inOneMonth);
 }
 
 // 更新顶部结果状态栏（metaText 带 5 秒自动还原）
@@ -54,12 +59,15 @@ export function getOriginPortByProvince(province) {
     return PROVINCE_PORT_MAP[province] || '上海/SHANGHAI';
 }
 
-// 欧洲国家自动启用 ICS2 费
+// 欧盟/欧洲经济区自动启用 ICS2 费，固定70元
 export function autoEnableICS2ForEurope() {
     var destCountry = store.form.destCountry || '';
     var sm = store.feeData.seaManager;
-    if (isEuropeanCountry(destCountry) && !sm.ics2Enabled) {
+    if (isEuropeanCountry(destCountry)) {
         sm.ics2Enabled = true;
         sm.ics2Fee = 70;
+    } else {
+        sm.ics2Enabled = false;
+        sm.ics2Fee = 0;
     }
 }

@@ -14,6 +14,7 @@ export default {
             PRODUCT_OPTIONS: PRODUCT_OPTIONS,
             BOX_TYPE_OPTIONS: BOX_TYPE_OPTIONS,
             BOX_VOLUMES: BOX_VOLUMES,
+            sizeMsOpenFor: '',
         };
     },
     computed: {
@@ -26,6 +27,19 @@ export default {
         totalBoxes() {
             return Object.values(this.store.form.boxTypeCounts).reduce((s, n) => s + n, 0) || 1;
         },
+        gloveQtyTotal() {
+            let total = 0;
+            Object.entries(store.form.gloveQuantities || {}).forEach(([p, sizes]) => {
+                if (!store.form.productTypes.includes(p)) return;
+                const selectedSizes = store.form.productSizes[p] || [];
+                Object.entries(sizes || {}).forEach(([s, v]) => {
+                    if (selectedSizes.includes(s)) {
+                        total += parseFloat(v) || 0;
+                    }
+                });
+            });
+            return Math.round(total);
+        },
     },
     watch: {
         boxWatchKey() { this.syncBoxDerived(); },
@@ -33,8 +47,21 @@ export default {
         productWatchKey(joined) {
             const arr = joined ? joined.split(',') : [];
             const newSizes = {};
-            arr.forEach(p => { newSizes[p] = this.store.form.productSizes[p] || 'M'; });
+            const newQuantities = {};
+            arr.forEach(p => {
+                const sizes = this.store.form.productSizes[p];
+                const selectedSizes = Array.isArray(sizes) ? sizes.slice() : ['M'];
+                newSizes[p] = selectedSizes;
+                const oldQty = store.form.gloveQuantities[p] || {};
+                const qty = {};
+                selectedSizes.forEach(s => {
+                    qty[s] = parseFloat(oldQty[s]) || 0;
+                });
+                newQuantities[p] = qty;
+            });
             this.store.form.productSizes = newSizes;
+            this.store.form.gloveQuantities = newQuantities;
+            this.syncGloveQty();
         },
     },
     mounted() {
@@ -42,6 +69,7 @@ export default {
         this.loadCountries();
         document.addEventListener('click', this.closeMs);
         this.syncBoxDerived();
+        this.syncGloveQty();
     },
     beforeUnmount() {
         document.removeEventListener('click', this.closeMs);
@@ -95,6 +123,10 @@ export default {
         closeMs() {
             store.productMsOpen = false;
             store.boxMsOpen = false;
+            this.sizeMsOpenFor = '';
+        },
+        toggleSizeMs(p) {
+            this.sizeMsOpenFor = this.sizeMsOpenFor === p ? '' : p;
         },
         onProductToggle(value, e) {
             const arr = store.form.productTypes.slice();
@@ -118,11 +150,31 @@ export default {
             const i = store.form.boxTypes.indexOf(bt);
             if (i >= 0) store.form.boxTypes.splice(i, 1);
         },
-        // ===== 尺码选择 =====
-        onSizeChange(p, e) {
-            store.form.productSizes[p] = e.target.value;
+        // ===== 尺码选择（多选） =====
+        onSizeToggle(p, size, e) {
+            const arr = Array.isArray(store.form.productSizes[p]) ? store.form.productSizes[p].slice() : [];
+            const idx = arr.indexOf(size);
+            if (e.target.checked) {
+                if (idx < 0) arr.push(size);
+            } else if (idx >= 0) {
+                arr.splice(idx, 1);
+            }
+            store.form.productSizes[p] = arr.length > 0 ? arr : ['M'];
+            const qty = Object.assign({}, store.form.gloveQuantities[p] || {});
+            if (e.target.checked && !(size in qty)) qty[size] = 0;
+            store.form.gloveQuantities[p] = qty;
+            this.syncGloveQty();
         },
-        // ===== 箱型数量 =====
+        onGloveQtyInput(p, size, e) {
+            const qty = Object.assign({}, store.form.gloveQuantities[p] || {});
+            qty[size] = Math.max(0, parseInt(e.target.value) || 0);
+            store.form.gloveQuantities[p] = qty;
+            this.syncGloveQty();
+        },
+        syncGloveQty() {
+            store.form.gloveQty = this.gloveQtyTotal || 0;
+        },
+        // ===== 柜型数量 =====
         onBoxQtyInput(bt, e) {
             const n = parseInt(e.target.value) || 1;
             store.form.boxTypeCounts[bt] = Math.max(1, n);
@@ -135,7 +187,7 @@ export default {
             if (selected.length === 0) {
                 store.form.boxes = 1;
                 store.form.volume = 0;
-                store.form.volumeHint = '请先选择集装箱箱型';
+                store.form.volumeHint = '请先选择集装箱柜型';
                 store.form.weight = 15;
                 return;
             }
@@ -189,12 +241,10 @@ export default {
 
             <div class="form-group full">
               <label class="form-label">产品类型 <span class="req">*</span></label>
-              <div class="multi-select" id="productTypeMulti" :class="{ open: store.productMsOpen }">
+              <div class="multi-select product-type-selector" id="productTypeMulti" :class="{ open: store.productMsOpen }">
                 <div class="multi-select-trigger" @click.stop="toggleMs('product')">
                   <span class="multi-select-placeholder" v-if="store.form.productTypes.length === 0">请选择产品类型（支持多选）</span>
-                  <span class="multi-select-tags" v-else>
-                    <span class="ms-tag" v-for="p in store.form.productTypes" :key="p">{{ p.split('（')[0] }}<span class="ms-tag-x" @click.stop="removeProduct(p)">×</span></span>
-                  </span>
+                  <span class="product-type-summary" v-else>已选 {{ store.form.productTypes.length }} 种产品</span>
                   <svg class="ms-arrow" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 5 6 8 9 5"/></svg>
                 </div>
                 <div class="multi-select-dropdown" v-show="store.productMsOpen">
@@ -203,24 +253,62 @@ export default {
                   </label>
                 </div>
               </div>
-              <div id="productSizeContainer" style="margin-top:0.6rem" v-show="store.form.productTypes.length">
+              <div id="productSizeContainer" class="product-size-container" v-show="store.form.productTypes.length">
                 <div class="product-size-row" v-for="p in store.form.productTypes" :key="p">
-                  <span class="product-size-label">{{ p }}</span>
-                  <select class="product-size-select" :value="store.form.productSizes[p] || 'M'" @change="onSizeChange(p, $event)">
-                    <option value="S">S</option>
-                    <option value="M">M</option>
-                    <option value="L">L</option>
-                    <option value="XL">XL</option>
-                  </select>
+                  <span class="product-size-label">{{ p }}<span class="ms-tag-x" @click.stop="removeProduct(p)">×</span></span>
+                  <div class="multi-select product-size-selector" :class="{ open: sizeMsOpenFor === p }">
+                    <div class="multi-select-trigger" @click.stop="toggleSizeMs(p)">
+                      <span class="multi-select-placeholder" v-if="(store.form.productSizes[p] || []).length === 0">选择尺码</span>
+                      <span class="multi-select-tags" v-else>
+                        <span class="ms-tag" v-for="s in store.form.productSizes[p]" :key="s">{{ s }}</span>
+                      </span>
+                      <svg class="ms-arrow" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 5 6 8 9 5"/></svg>
+                    </div>
+                    <div class="multi-select-dropdown" v-show="sizeMsOpenFor === p" @click.stop>
+                      <label class="ms-option" :class="{ selected: (store.form.productSizes[p] || []).includes(s) }" v-for="s in ['S','M','L','XL']" :key="s">
+                        <input type="checkbox" :checked="(store.form.productSizes[p] || []).includes(s)" @change="onSizeToggle(p, s, $event)">
+                        <span>{{ s }}</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
             <div class="form-group full">
-              <label class="form-label">集装箱箱型 <span class="req">*</span></label>
+              <label class="form-label">手套数量 <span class="req">*</span></label>
+              <div class="glove-qty-toggle" :class="{ open: store.gloveQtyPanelOpen }" @click="store.gloveQtyPanelOpen = !store.gloveQtyPanelOpen">
+                <span class="glove-qty-total">合计 {{ store.form.gloveQty || 0 }} {{ store.form.gloveUnit }}</span>
+                <select class="form-select glove-unit-select" v-model="store.form.gloveUnit" @click.stop>
+                  <option value="千支">千支</option>
+                  <option value="八百支">八百支</option>
+                </select>
+                <svg class="glove-qty-arrow" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 5 6 8 9 5"/></svg>
+              </div>
+              <div class="glove-qty-panel" :class="{ open: store.gloveQtyPanelOpen }">
+                <div class="glove-qty-empty" v-if="store.form.productTypes.length === 0">请先选择产品类型</div>
+                <div class="glove-qty-table" v-else>
+                  <div class="glove-qty-table-head">
+                    <span>手套 / 尺码</span>
+                    <span>数量</span>
+                  </div>
+                  <template v-for="p in store.form.productTypes" :key="p">
+                    <template v-for="s in ['S','M','L','XL']" :key="p + '-' + s">
+                      <div class="glove-qty-table-row" v-if="(store.form.productSizes[p] || []).includes(s)">
+                        <span class="glove-qty-product">{{ s }}码{{ p }}</span>
+                        <input type="number" class="glove-qty-input" :disabled="!(store.form.productSizes[p] || []).includes(s)" :value="((store.form.gloveQuantities[p] || {})[s] || 0)" min="0" step="1" @input="onGloveQtyInput(p, s, $event)">
+                      </div>
+                    </template>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group full">
+              <label class="form-label">集装箱柜型 <span class="req">*</span></label>
               <div class="multi-select" id="boxTypeMulti" :class="{ open: store.boxMsOpen }">
                 <div class="multi-select-trigger" @click.stop="toggleMs('box')">
-                  <span class="multi-select-placeholder" v-if="store.form.boxTypes.length === 0">请选择集装箱箱型（支持多选）</span>
+                  <span class="multi-select-placeholder" v-if="store.form.boxTypes.length === 0">请选择集装箱柜型（支持多选）</span>
                   <span class="multi-select-tags" v-else>
                     <span class="ms-tag" v-for="bt in store.form.boxTypes" :key="bt">{{ bt }}<span class="ms-tag-x" @click.stop="removeBoxType(bt)">×</span></span>
                   </span>
@@ -254,48 +342,37 @@ export default {
               </select>
             </div>
 
-            <div class="form-group full">
-              <label class="form-label">手套数量 <span class="req">*</span></label>
-              <div class="input-prefix">
-                <input type="number" class="form-input" id="gloveQty" min="1" step="1" style="padding-right:3rem" v-model.number="store.form.gloveQty">
-                <select class="unit-select" v-model="store.form.gloveUnit">
-                  <option value="千支">千支</option>
-                  <option value="八百支">八百支</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- 每种箱型数量输入（动态生成） -->
+            <!-- 每种柜型数量输入（动态生成） -->
             <div class="form-group full" id="boxTypeQuantitiesGroup" v-show="store.form.boxTypes.length">
-              <label class="form-label">各箱型数量</label>
+              <label class="form-label">各柜型数量</label>
               <div id="boxTypeQuantities">
                 <div class="box-qty-row" v-for="bt in store.form.boxTypes" :key="bt">
                   <span class="box-qty-type">{{ bt }}</span>
-                  <span class="box-qty-volume">{{ BOX_VOLUMES[bt] }} m³/箱</span>
+                  <span class="box-qty-volume">{{ BOX_VOLUMES[bt] }} m³/柜</span>
                   <span class="box-qty-label">数量:</span>
                   <input type="number" class="box-qty-input" :value="store.form.boxTypeCounts[bt] || 1" min="1" max="9999" step="1" @input="onBoxQtyInput(bt, $event)">
                   <span class="box-qty-subtotal">{{ boxSubtotal(bt) }} m³</span>
                 </div>
                 <div class="box-qty-summary">
-                  装箱总数: <span>{{ store.form.boxes }} 箱</span>
+                  装柜总数: <span>{{ store.form.boxes }} 柜</span>
                   总体积合计: <span>{{ store.form.volume.toFixed(1) }} m³</span>
                 </div>
               </div>
             </div>
 
             <div class="form-group">
-              <label class="form-label">装箱总数</label>
+              <label class="form-label">装柜总数</label>
               <div class="input-prefix">
                 <input type="number" class="form-input" id="boxes" min="1" readonly style="padding-right:2.5rem;background:var(--rule-weak);color:var(--muted)" :value="store.form.boxes">
-                <span class="unit">箱</span>
+                <span class="unit">柜</span>
               </div>
             </div>
 
             <div class="form-group">
-              <label class="form-label">单箱平均重量</label>
+              <label class="form-label">单柜平均重量</label>
               <div class="input-prefix">
                 <input type="number" class="form-input" id="weightPerBox" min="0" step="0.1" style="padding-right:2.5rem" v-model.number="store.form.weightPerBox">
-                <span class="unit">kg/箱</span>
+                <span class="unit">kg/柜</span>
               </div>
             </div>
 
@@ -318,46 +395,25 @@ export default {
               <input type="date" class="form-input" id="requiredArrival" v-model="store.form.requiredArrival">
             </div>
 
-            <div class="form-divider"></div>
-
             <div class="form-group full">
-              <div class="advanced-toggle" id="advToggle" :class="{ open: store.advancedOpen }" @click="toggleAdvanced">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                高级选项（贸易条款 / 运输偏好）
-              </div>
-              <div class="advanced-section" id="advSection" :class="{ open: store.advancedOpen }">
-                <div class="form-grid" style="margin-top:0.5rem">
-                  <div class="form-group">
-                    <label class="form-label">贸易条款偏好</label>
-                    <select class="form-select" id="tradePref" v-model="store.form.tradePref">
-                      <option value="FOB">FOB (F条款)</option>
-                      <option value="FCA">FCA (F条款)</option>
-                      <option value="FAS">FAS (F条款)</option>
-                      <option value="CIF">CIF (C条款)</option>
-                      <option value="DDP">DDP (D条款)</option>
-                    </select>
-                  </div>
-                  <div class="form-group">
-                    <label class="form-label">运输方式偏好</label>
-                    <select class="form-select" id="transportPref" v-model="store.form.transportPref">
-                      <option value="auto">自动选择</option>
-                      <option value="cost">成本优先</option>
-                      <option value="time">时效优先</option>
-                      <option value="stable">稳定性优先</option>
-                    </select>
-                  </div>
-                  <div class="form-group full">
-                    <label class="form-label" style="display:flex;align-items:center;gap:0.4rem;text-transform:none;letter-spacing:0">
-                      <input type="checkbox" v-model="store.form.urgent" style="accent-color:var(--accent);width:15px;height:15px">
-                      加急（优先保证到货时效）
-                    </label>
-                  </div>
-                  <div class="form-group full">
-                    <label class="form-label">备注 / 特殊要求</label>
-                    <textarea class="form-textarea" id="remarks" placeholder="如：需FDA认证、温度控制、加急等" v-model="store.form.remarks"></textarea>
-                  </div>
-                </div>
-              </div>
+              <label class="form-label">贸易条款偏好</label>
+              <select class="form-select" id="tradePref" v-model="store.form.tradePref">
+                <option value="FOB">FOB (F条款)</option>
+                <option value="FCA">FCA (F条款)</option>
+                <option value="FAS">FAS (F条款)</option>
+                <option value="CIF">CIF (C条款)</option>
+                <option value="DDP">DDP (D条款)</option>
+              </select>
+            </div>
+            <div class="form-group full">
+              <label class="form-label" style="display:flex;align-items:center;gap:0.4rem;text-transform:none;letter-spacing:0">
+                <input type="checkbox" v-model="store.form.urgent" style="accent-color:var(--accent);width:15px;height:15px">
+                加急（优先保证到货时效）
+              </label>
+            </div>
+            <div class="form-group full">
+              <label class="form-label">备注 / 特殊要求</label>
+              <textarea class="form-textarea" id="remarks" placeholder="如：需FDA认证、温度控制、加急等" v-model="store.form.remarks"></textarea>
             </div>
 
           </div>

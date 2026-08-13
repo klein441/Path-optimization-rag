@@ -81,7 +81,17 @@ export async function apiRecommend(payload) {
     return resp.json();
 }
 
-// ===== 港杂费推荐（根据始发港/贸易条款/箱型查询标准表）=====
+// ===== 费用信息确认后回写数据库 =====
+export async function apiConfirmFees(payload) {
+    const resp = await fetch(API_BASE + '/api/recommendation/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    return resp.json();
+}
+
+// ===== 港杂费推荐（根据始发港/贸易条款/柜型查询标准表）=====
 export async function fetchPortMiscFee(originPort, tradeTerm, boxTypes) {
     if (!originPort || originPort === '—') return;
     var bt = (boxTypes && boxTypes.length > 0) ? boxTypes[0] : '40HQ';
@@ -105,7 +115,7 @@ export async function fetchPortMiscFee(originPort, tradeTerm, boxTypes) {
             pm.selectedCarrier = (pm.carriers.length > 0) ? pm.carriers[0] : null;
             pm.error = false;
             console.log('[港杂费] 推荐:', originPort, tradeTerm, bt,
-                '单箱¥' + perBoxFee + ' × ' + totalBoxes + '箱 = ¥' + fee,
+                '单柜¥' + perBoxFee + ' × ' + totalBoxes + '柜 = ¥' + fee,
                 '| 承运商:', pm.bestCarrier,
                 '(' + result.data.totalMatched + '条标准记录)');
         } else {

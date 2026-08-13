@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>注册 - 物流路径推荐系统</title>
+    <link rel="stylesheet" type="text/css" href="assets/css/index.css" />
+</head>
+<body>
+    <div id="login-overlay" class="register-mode">
+        <div class="bg">
+            <div class="wel">物流路径推荐系统</div>
+            <div class="user">
+                <div id="yonghu">用户名</div>
+                <input type="text" id="reg-username" />
+            </div>
+            <div class="password">
+                <div id="yonghu">密&nbsp;&nbsp;&nbsp;码</div>
+                <input type="password" id="reg-password" />
+            </div>
+            <div class="confirm">
+                <div id="yonghu">确认密码</div>
+                <input type="password" id="reg-confirm" />
+            </div>
+            <button class="btn register-submit-btn" id="reg-btn">注 册</button>
+            <button class="btn back-login-btn" id="back-btn">返回登录</button>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var regBtn = document.getElementById('reg-btn');
+        var backBtn = document.getElementById('back-btn');
+        var userInput = document.getElementById('reg-username');
+        var passInput = document.getElementById('reg-password');
+        var confirmInput = document.getElementById('reg-confirm');
+
+        backBtn.addEventListener('click', function() {
+            window.location.href = 'index.html';
+        });
+
+        regBtn.addEventListener('click', async function() {
+            var username = userInput.value.trim();
+            var password = passInput.value.trim();
+            var confirmPassword = confirmInput.value.trim();
+
+            if (!username || !password || !confirmPassword) {
+                alert('请填写用户名、密码和确认密码');
+                return;
+            }
+            if (password !== confirmPassword) {
+                alert('两次输入的密码不一致');
+                return;
+            }
+            if (username === 'admin') {
+                alert('该用户名已被使用');
+                return;
+            }
+
+            try {
+                var resp = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password,
+                        confirmPassword: confirmPassword
+                    })
+                });
+                var data = await resp.json();
+                if (!data.success) {
+                    alert(data.error || '注册失败');
+                    return;
+                }
+                alert('注册成功，请登录');
+                window.location.href = 'index.html';
+            } catch (e) {
+                alert('注册失败，请确认后端服务已启动');
+                return;
+            }
+        });
+
+        confirmInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                regBtn.click();
+            }
+        });
+    })();
+    </script>
+</body>
+</html>

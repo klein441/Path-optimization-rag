@@ -6,8 +6,8 @@ import { reactive } from '../../vendor/vue.esm-browser.prod.js';
 import { store } from '../state.js';
 import { TRANSPORT_MODE_FREIGHT } from '../constants.js';
 import { formatFee, autoEnableICS2ForEurope, showNotification, isFTradeTerm } from '../utils.js';
-import { initLandFees, calculateTollFee, getSeaManagerTotal, getOtherTotal, calculateAllFees } from '../fees.js';
-import { fetchPortMiscFee } from '../api.js';
+import { initLandFees, calculateTollFee, getSeaManagerTotal, getOtherTotal, calculateAllFees, buildConfirmedFeeItems } from '../fees.js';
+import { fetchPortMiscFee, apiConfirmFees } from '../api.js';
 import { fetchOceanFreightRate, selectPortMiscCarrier, selectLandCarrier } from '../ocean.js';
 import OceanQuotes from './OceanQuotes.js';
 
@@ -17,7 +17,7 @@ export default {
         return {
             store: store,
             TRANSPORT_MODE_FREIGHT: TRANSPORT_MODE_FREIGHT,
-            sections: reactive({ land: false, seaManager: false, portMisc: false, ocean: true, other: false }),
+            sections: reactive({ land: false, seaManager: false, portMisc: false, ocean: false, other: false }),
         };
     },
     computed: {
@@ -77,11 +77,6 @@ export default {
                 sm.manifestFee = parseFloat(sm.manifestMode) || 0;
             }
         },
-        onIcs2Toggle() {
-            if (!store.feeData.seaManager.ics2Enabled) {
-                store.feeData.seaManager.ics2Fee = 0;
-            }
-        },
         addOtherRow() {
             store.feeData.other.push({ name: '', amount: 0 });
         },
@@ -97,15 +92,26 @@ export default {
         selectLandCarrierHandler(carrier) {
             selectLandCarrier(carrier);
         },
-        confirmFees() {
+        async confirmFees() {
             const oceanCarrier = store.feeData.ocean.selectedCarrier;
             if (!this.isFTerm && oceanCarrier && oceanCarrier.isValid === false) {
                 showNotification('当前海运费合约已过期，请选择有效合约后再确认');
                 return;
             }
             store.feeConfirmed = true;
-            calculateAllFees();
-            showNotification('费用信息已确认，最终费用¥' + formatFee(calculateAllFees()));
+            const total = calculateAllFees();
+            if (store.lastSubmitPayload) {
+                try {
+                    await apiConfirmFees({
+                        payload: store.lastSubmitPayload,
+                        total: total,
+                        items: buildConfirmedFeeItems(),
+                    });
+                } catch (e) {
+                    console.warn('[费用确认] 数据库同步失败:', e.message);
+                }
+            }
+            showNotification('费用信息已确认，最终费用¥' + formatFee(total));
         },
         unlockFees() {
             store.feeConfirmed = false;
@@ -159,16 +165,6 @@ export default {
               </template>
               <!-- 匹配成功 — 承运商推荐展示 -->
               <div v-show="store.feeData.land.carriers.length > 0">
-                <div class="ocean-realtime-header" style="margin-bottom:8px;margin-top:8px">
-                  <div class="ocean-realtime-source">
-                    <span class="live-dot" style="background:#10b981;box-shadow:0 0 8px #10b981"></span>
-                    <span>报价卡 · {{ store.feeData.land.source }}</span>
-                  </div>
-                </div>
-                <div class="ocean-realtime-meta" style="margin-bottom:4px">
-                  <span>推荐承运商: <strong>{{ store.feeData.land.bestCarrier }}</strong></span><span class="dot">·</span>
-                  <span>{{ store.feeData.land.totalMatched }}条记录</span>
-                </div>
                 <!-- 承运商报价卡片 -->
                 <div style="margin-top:12px">
                   <div style="font-weight:600;font-size:13px;color:#334155;margin-bottom:10px;display:flex;align-items:center;gap:6px">
@@ -182,7 +178,7 @@ export default {
                          @click="selectLandCarrierHandler(c)">
                       <div class="ocean-quote-card-top">
                         <div class="ocean-quote-carrier"><span v-if="idx === 0" class="star-icon">⭐</span>{{ c.carrier }}</div>
-                        <div class="ocean-quote-price">¥{{ c.landFreightMedian }}<span style="font-size:11px;font-weight:400;color:#94a3b8">/箱</span></div>
+                        <div class="ocean-quote-price">¥{{ c.landFreightMedian }}<span style="font-size:11px;font-weight:400;color:#94a3b8">/柜</span></div>
                       </div>
                       <div class="ocean-quote-card-meta">
                         <span>样本{{ c.sampleCount || 0 }}</span>
@@ -223,16 +219,16 @@ export default {
           </div>
 
           <!-- 海管家 section -->
-          <div class="fee-section" :class="{ open: sections.seaManager }" data-fee-group="seaManager">
+          <div class="fee-section ocean ocean-body" :class="{ open: sections.seaManager }" data-fee-group="seaManager">
             <div class="fee-section-header" @click="toggleSection('seaManager')">
               <div class="fee-section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18s1.5-2 4.5-2 4.5 2 9 2 4.5-2 4.5-2"/><path d="M21 12l-9-7-9 7"/><path d="M12 2l0 18"/></svg></div>
               <div class="fee-section-title">海管家费用</div>
               <div class="fee-section-summary">¥{{ formatFee(seaManagerTotal) }}</div>
               <svg class="fee-section-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>
             </div>
-            <div class="fee-section-body">
+            <div class="fee-section-body ocean-body">
               <div class="fee-item">
-                <div class="fee-item-label">舱单费 <span class="info-badge">元/箱</span></div>
+                <div class="fee-item-label">舱单费 <span class="info-badge">元/柜</span></div>
                 <select class="fee-select" id="fpManifestSelect" v-model="store.feeData.seaManager.manifestMode" @change="onManifestModeChange" :disabled="store.feeConfirmed">
                   <option v-for="v in [55,25,35,80]" :key="v" :value="String(v)">{{ v }}</option>
                   <option value="custom">自定义</option>
@@ -241,17 +237,14 @@ export default {
                 <span class="fee-item-unit">元</span>
               </div>
               <div class="fee-item">
-                <div class="fee-item-label">VGM费 <span class="info-badge">元/箱</span></div>
+                <div class="fee-item-label">VGM费 <span class="info-badge">元/柜</span></div>
                 <input type="number" class="fee-item-input" id="fpVgmFee" v-model.number="store.feeData.seaManager.vgmFee" step="0.1" min="0" :disabled="store.feeConfirmed">
                 <span class="fee-item-unit">元</span>
               </div>
               <div class="fee-item">
-                <div class="fee-item-label">ICS2费 <span class="info-badge">仅欧洲</span></div>
-                <div class="toggle-wrap">
-                  <label class="toggle-switch"><input type="checkbox" v-model="store.feeData.seaManager.ics2Enabled" @change="onIcs2Toggle" :disabled="store.feeConfirmed"><span class="toggle-slider"></span></label>
-                  <span class="toggle-label">启用</span>
-                </div>
-                <input type="number" class="fee-item-input small" id="fpIcs2Fee" step="0.1" min="0" v-if="store.feeData.seaManager.ics2Enabled" v-model.number="store.feeData.seaManager.ics2Fee" :disabled="store.feeConfirmed">
+                <div class="fee-item-label">ICS2费 <span class="info-badge">欧盟/欧洲经济区</span></div>
+                <span class="fee-item-value" style="font-size:0.9rem;font-weight:600;color:var(--ink)" v-if="store.feeData.seaManager.ics2Enabled">¥70</span>
+                <span class="fee-item-value" style="font-size:0.9rem;font-weight:600;color:var(--muted)" v-else>不适用</span>
                 <span class="fee-item-unit" v-if="store.feeData.seaManager.ics2Enabled">元</span>
               </div>
             </div>
@@ -278,28 +271,11 @@ export default {
                 </div>
                 <div>
                   <div class="ocean-error-title">港杂费标准未匹配</div>
-                  <div class="ocean-error-desc">请检查始发港 / 贸易条款 / 箱型是否在标准表范围内</div>
+                  <div class="ocean-error-desc">请检查始发港 / 贸易条款 / 柜型是否在标准表范围内</div>
                 </div>
               </div>
               <!-- 标准表匹配成功 — 承运商推荐展示 -->
               <div v-show="store.feeData.portMisc.carriers.length > 0">
-                <div class="ocean-realtime-header" style="margin-bottom:8px">
-                  <div class="ocean-realtime-source">
-                    <span class="live-dot" style="background:#10b981;box-shadow:0 0 8px #10b981"></span>
-                    <span>标准表 · {{ store.feeData.portMisc.source }}</span>
-                  </div>
-                </div>
-                <div class="ocean-realtime-rates" style="margin-bottom:8px">
-                  <div class="ocean-rate-item primary" style="flex:1">
-                    <div class="ocean-rate-label">推荐单箱费率（{{ store.feeData.portMisc.usedLevel }}）</div>
-                    <div class="ocean-rate-value">¥{{ formatFee(store.feeData.portMisc.perBoxFee) }}</div>
-                  </div>
-                </div>
-                <div class="ocean-realtime-meta" style="margin-bottom:4px">
-                  <span>推荐承运商: <strong>{{ store.feeData.portMisc.bestCarrier }}</strong></span><span class="dot">·</span>
-                  <span>{{ store.feeData.portMisc.totalMatched }}条记录</span><span class="dot">·</span>
-                  <span>{{ store.feeData.portMisc.usedLevel }}级数据</span>
-                </div>
                 <!-- 各承运商报价卡片 -->
                 <div style="margin-top:12px">
                   <div style="font-weight:600;font-size:13px;color:#334155;margin-bottom:10px;display:flex;align-items:center;gap:6px">
@@ -313,7 +289,7 @@ export default {
                          @click="selectMiscCarrier(c)">
                       <div class="ocean-quote-card-top">
                         <div class="ocean-quote-carrier"><span v-if="idx === 0" class="star-icon">⭐</span>{{ c.carrier }}</div>
-                        <div class="ocean-quote-price">¥{{ c.recommendedFee }}<span style="font-size:11px;font-weight:400;color:#94a3b8">/箱</span></div>
+                        <div class="ocean-quote-price">¥{{ c.recommendedFee }}<span style="font-size:11px;font-weight:400;color:#94a3b8">/柜</span></div>
                       </div>
                       <div class="ocean-quote-card-meta">
                         <span class="valid-badge ok">{{ c.dataLevel || '—' }}</span>
@@ -325,7 +301,7 @@ export default {
                     </div>
                   </div>
                 </div>
-                <!-- 港杂费合计（单箱费率 × 箱数） -->
+                <!-- 港杂费合计（单柜费率 × 柜数） -->
                 <div class="ocean-total-row" style="margin-top:12px">
                   <span class="ocean-total-label">港杂费合计</span>
                   <span class="ocean-total-value-wrap">
@@ -399,7 +375,7 @@ export default {
                 </div>
                 <div class="ocean-realtime-tags">
                   <span class="ocean-tag factory-tag" id="fpOceanFactoryTag">{{ store.ocean.factoryTagText }}</span>
-                  <span class="ocean-tag fcl-tag">普货 · FCL整箱</span>
+                  <span class="ocean-tag fcl-tag">普货 · FCL整柜</span>
                   <span class="ocean-tag carrier-tag" id="fpOceanShippingLine">{{ store.ocean.shippingLineText }}</span>
                 </div>
                 <div class="ocean-realtime-quotes" id="fpOceanQuotesList" v-show="store.ocean.carriers.length">
@@ -423,14 +399,14 @@ export default {
           </div>
 
           <!-- 其他费用 section -->
-          <div class="fee-section" :class="{ open: sections.other }" data-fee-group="other">
+          <div class="fee-section ocean ocean-body" :class="{ open: sections.other }" data-fee-group="other">
             <div class="fee-section-header" @click="toggleSection('other')">
               <div class="fee-section-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
               <div class="fee-section-title">其他费用</div>
               <div class="fee-section-summary">¥{{ formatFee(otherTotal) }}</div>
               <svg class="fee-section-arrow" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>
             </div>
-            <div class="fee-section-body" id="fpOtherFeeBody">
+            <div class="fee-section-body ocean-body" id="fpOtherFeeBody">
               <div class="other-fee-row" v-for="(o, idx) in store.feeData.other" :key="idx">
                 <input type="text" class="other-fee-name" placeholder="费用类型" v-model="o.name" :disabled="store.feeConfirmed">
                 <input type="number" class="other-fee-amount" placeholder="金额" step="0.1" min="0" v-model.number="o.amount" :disabled="store.feeConfirmed">

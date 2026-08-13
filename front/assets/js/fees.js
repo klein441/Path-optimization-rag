@@ -1,7 +1,7 @@
 /**
  * 费用计算与费用面板逻辑
  */
-import { TRANSPORT_MODE_FREIGHT } from './constants.js';
+import { TRANSPORT_MODE_FREIGHT, USD_TO_CNY } from './constants.js';
 import { store } from './state.js';
 import { getOriginPortByProvince, isFTradeTerm } from './utils.js';
 import { apiEstimateToll, fetchLandFreightFromRoute } from './api.js';
@@ -25,7 +25,44 @@ export function calculateAllFees() {
     const landTotal = fd.land.baseFreight + fd.land.tollFee + fd.land.insideLoadFee;
     const term = (store.results.primary && store.results.primary.tradeTerm) || store.form.tradePref || '';
     const oceanFee = isFTradeTerm(term) ? 0 : fd.ocean.fee;
-    return landTotal + getSeaManagerTotal() + fd.portMisc.fee + oceanFee + getOtherTotal() + getFixedTotal();
+    return landTotal + getSeaManagerTotal() + fd.portMisc.fee + oceanFee + getOtherTotal();
+}
+
+export function buildConfirmedFeeItems() {
+    const fd = store.feeData;
+    const totalBoxes = parseInt(store.form.boxes) || 1;
+    const term = (store.results.primary && store.results.primary.tradeTerm) || store.form.tradePref || '';
+    const items = [];
+    const push = (name, category, amount, basis) => {
+        const amt = Math.round((parseFloat(amount) || 0) * 100) / 100;
+        if (amt <= 0) return;
+        items.push({
+            name: name,
+            category: category,
+            amount_cny: amt,
+            amount_usd: Math.round(amt / USD_TO_CNY * 100) / 100,
+            basis: basis || '用户确认',
+            modified_by_user: true,
+        });
+    };
+
+    push('陆运费', '工厂到起运港拖车费', fd.land.baseFreight, '用户确认');
+    push('高速费', '工厂到起运港拖车费', fd.land.tollFee, '用户确认');
+    push('内装费', '工厂到起运港拖车费', fd.land.insideLoadFee, '用户确认');
+    push('舱单费', '海管家费用', fd.seaManager.manifestFee * totalBoxes, '用户确认');
+    push('VGM费', '海管家费用', fd.seaManager.vgmFee * totalBoxes, '用户确认');
+    push('ICS2费', '海管家费用', fd.seaManager.ics2Fee, '用户确认');
+    push('港杂费', '出口起运港港杂费', fd.portMisc.fee, '用户确认');
+    if (!isFTradeTerm(term)) {
+        push('海运费', '出口海运费', fd.ocean.fee, '用户确认');
+    }
+    (fd.fixed || []).forEach(function (f) {
+        push(f.name || '固定费用', '其他费用', f.amount, '用户确认');
+    });
+    (fd.other || []).forEach(function (o) {
+        push(o.name || '其他费用', '其他费用', o.amount, '用户确认');
+    });
+    return items;
 }
 
 // ===== 陆运费初始化（根据工厂省份和运输方式自动推荐）=====
@@ -94,7 +131,7 @@ export async function calculateTollFee() {
             var toll = result.data.tollFee;
             applyTollFee(toll);
             console.log('[高速费] LLM计算完成: 省份=' + province + ', 港口=' + originPort +
-                ', 箱数=' + boxCount + ', 高速费=¥' + toll + ' (来源: ' + (result.data.source || 'llm') + ')');
+                ', 柜数=' + boxCount + ', 高速费=¥' + toll + ' (来源: ' + (result.data.source || 'llm') + ')');
         } else {
             console.warn('[高速费] LLM返回异常，回退默认值:', result);
             applyTollFee(80);
@@ -130,11 +167,22 @@ export function applyResultToFeeData(data) {
 
     var items = primary.cost.items;
     var oceanModified = false; // 海运费是否来自用户手动修改（重新优化时保留用户确认值）
+    function setOtherFee(name, amount) {
+        for (var j = 0; j < fd.other.length; j++) {
+            if ((fd.other[j].name || '') === name) {
+                fd.other[j].amount = amount;
+                return;
+            }
+        }
+        fd.other.push({ name: name, amount: amount });
+    }
     for (var i = 0; i < items.length; i++) {
         var item = items[i];
         var amount = item.amount_cny || 0;
         var cat = item.category || '';
-        if ((item.name && item.name.indexOf('港杂费') !== -1) || cat.indexOf('港杂费') !== -1) {
+        if (item.name && item.name.indexOf('目的港港杂费') !== -1) {
+            setOtherFee('目的港港杂费', amount);
+        } else if ((item.name && item.name.indexOf('港杂费') !== -1) || cat.indexOf('港杂费') !== -1) {
             fd.portMisc.fee = amount;
             var boxCountForFee = primary.cost.box_count || 1;
             fd.portMisc.perBoxFee = Math.round(amount / boxCountForFee * 100) / 100;
@@ -154,12 +202,12 @@ export function applyResultToFeeData(data) {
             fd.seaManager.ics2Enabled = true;
             fd.seaManager.ics2Fee = amount;
         } else if (item.name && item.name.indexOf('报关') !== -1) {
-            fd.fixed.push({ name: '报关费', amount: amount });
+            setOtherFee('报关费', amount);
         } else if (item.name && item.name.indexOf('海运费') !== -1) {
             fd.ocean.fee = amount;
             if (item.modified_by_user) oceanModified = true;
         } else if (item.name && item.name.indexOf('保险') !== -1) {
-            fd.fixed.push({ name: '保险费', amount: amount });
+            setOtherFee('保险费', amount);
         }
     }
     // 如果有合约海运费信息，更新 ocean fee（仅在合约费率有效时覆盖）

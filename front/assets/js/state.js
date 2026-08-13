@@ -9,13 +9,15 @@ export const store = reactive({
         orderNumber: '',
         customer: 'Medline Inc.',
         productTypes: [],        // 选中的产品类型
-        productSizes: {},        // { "丁腈手套": "M", "PVC手套": "L" }
-        boxTypes: [],            // 选中的箱型
+        productSizes: {},        // { "丁腈手套": ["M","L"], "PVC手套": ["L"] }
+        boxTypes: [],            // 选中的柜型
         boxTypeCounts: {},       // { "40HQ": 5, "20GP": 3 }
         destCountry: '',
         destPort: '',
         gloveQty: 1000,
         gloveUnit: '千支',
+        gloveQuantities: {},   // { "丁腈手套": { "M": 100, "L": 100 } }
+        gloveQtyPanelOpen: false,
         weightPerBox: 15,
         cargoReady: '',
         requiredArrival: '',
@@ -26,7 +28,7 @@ export const store = reactive({
         // 派生值（由 OrderForm watcher 同步）
         boxes: 1,
         volume: 0,
-        volumeHint: '请先选择集装箱箱型',
+        volumeHint: '请先选择集装箱柜型',
         weight: 15,
     },
 
@@ -37,8 +39,9 @@ export const store = reactive({
     destPortsLoading: false,
 
     // ===== UI 开关 =====
-    advancedOpen: false,
+    advancedOpen: true,
     feeConfirmed: false, // 费用信息是否已确认（结果页锁定费用输入）
+    lastSubmitPayload: null, // 最近一次推荐请求的原始载荷，用于费用确认时回写数据库
     productMsOpen: false,
     boxMsOpen: false,
 
@@ -51,7 +54,7 @@ export const store = reactive({
             bestCarrier: '',        // 推荐承运商名称（最便宜）
             selectedCarrier: null,  // 用户选择的承运商对象
             carriers: [],           // 全部匹配的承运商列表
-            perBoxFee: 0,           // 推荐承运商的单箱费率
+            perBoxFee: 0,           // 推荐承运商的单柜费率
             source: '',             // 数据来源
             totalMatched: 0,        // 匹配记录数
             loading: false,
@@ -59,8 +62,8 @@ export const store = reactive({
         },
         seaManager: { manifestFee: 55, manifestCustom: 0, manifestMode: '55', vgmFee: 5, ics2Enabled: false, ics2Fee: 0 },
         portMisc: {
-            fee: 320,               // 总费用（单箱费率 × 箱数）
-            perBoxFee: 0,           // 推荐承运商的单箱费率
+            fee: 320,               // 总费用（单柜费率 × 柜数）
+            perBoxFee: 0,           // 推荐承运商的单柜费率
             bestCarrier: '',        // 推荐承运商名称（最便宜）
             selectedCarrier: null,  // 用户选择的承运商对象
             carriers: [],           // 全部匹配的承运商列表
@@ -85,7 +88,7 @@ export const store = reactive({
         error: false,
         errorDesc: '',
         realtime: false,
-        carriers: [],          // 过滤后（全箱型）的船公司报价
+        carriers: [],          // 过滤后（全柜型）的船公司报价
         boxTypeKeys: [],
         medianRateText: '—',
         routeInfoText: '—',

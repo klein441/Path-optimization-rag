@@ -1,5 +1,7 @@
 /* ===== Result Panel ===== */
-.result-panel{min-height:600px;min-width:0}
+.result-panel{height:100%;min-height:0;min-width:0}
+.result-panel .panel-header{padding:1.25rem 1.8rem}
+.result-panel .panel-body{padding:1.6rem 1.8rem}
 .result-body{padding:0}
 
 /* Empty state */
@@ -67,7 +69,7 @@
 .route-arrow .ra-line{width:100%;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2));position:relative;border-radius:1px}
 .route-arrow .ra-line::after{content:'';position:absolute;right:-1px;top:50%;transform:translateY(-50%);border:4px solid transparent;border-left-color:var(--accent2)}
 .route-arrow .ra-label{font-size:0.62rem;color:var(--muted);font-weight:600;white-space:nowrap}
-.route-arrow .ra-days{font-size:0.6rem;color:var(--accent);font-family:var(--font-mono);font-weight:600}
+.route-arrow .ra-days{font-size:0.68rem;color:var(--accent);font-family:var(--font-mono);font-weight:600}
 
 /* Summary banner */
 .summary-banner{
@@ -89,8 +91,8 @@
 .rec-card:hover{border-color:var(--rule-strong);box-shadow:var(--shadow-sm)}
 .rec-card-label{font-family:var(--font-mono);font-size:0.66rem;color:var(--muted);font-weight:500;margin-bottom:0.4rem;display:flex;align-items:center;gap:0.3rem;letter-spacing:0.08em;text-transform:uppercase}
 .rec-card-label svg{width:13px;height:13px;color:var(--accent)}
-.rec-card-value{font-family:var(--font-display);font-size:1.15rem;font-weight:600;color:var(--ink);line-height:1.3;letter-spacing:-0.01em}
-.rec-card-value.mono{font-family:var(--font-mono);font-size:1rem}
+.rec-card-value{font-family:var(--font-display);font-size:1.05rem;font-weight:600;color:var(--ink);line-height:1.3;letter-spacing:-0.01em}
+.rec-card-value.mono{font-family:var(--font-mono);font-size:0.95rem}
 .rec-card-sub{font-size:0.7rem;color:var(--muted);margin-top:0.3rem}
 .rec-card .badge{position:absolute;top:0.7rem;right:0.7rem;font-size:0.6rem;font-weight:600;padding:2px 6px;border-radius:3px;font-family:var(--font-mono);letter-spacing:0.05em;text-transform:uppercase}
 .badge-rec{background:rgba(22,163,74,0.08);color:var(--success)}
@@ -112,7 +114,7 @@
 .cost-table td:last-child{text-align:right;font-family:var(--font-mono);font-weight:500;color:var(--ink)}
 .cost-table tr.total td{padding-top:0.8rem;font-size:0.95rem;font-weight:600;border-top:2px solid var(--rule-strong);border-bottom:none}
 .cost-table tr.total td:first-child{color:var(--ink);font-family:var(--font-display)}
-.cost-table tr.total td:last-child{color:var(--accent);font-size:1.2rem;font-family:var(--font-display)}
+.cost-table tr.total td:last-child{color:var(--accent);font-size:1.05rem;font-family:var(--font-display)}
 .cost-table thead th{font-family:var(--font-mono);font-size:0.68rem;font-weight:500;color:var(--muted);text-align:left;padding:0.5rem 0;border-bottom:1px solid var(--rule);letter-spacing:0.08em;text-transform:uppercase}
 .cost-table thead th:last-child{text-align:right}
 .cost-item-name{font-weight:600;color:var(--ink);font-size:0.84rem}
@@ -161,7 +163,7 @@
 .timeline-dot.done svg{color:#fff}
 .timeline-content{padding-top:0.55rem;width:100%}
 .timeline-title{font-size:0.82rem;font-weight:600;color:var(--ink)}
-.timeline-date{font-size:0.72rem;color:var(--muted);font-family:var(--font-mono);margin-top:2px}
+.timeline-date{font-size:0.75rem;color:var(--muted);font-family:var(--font-mono);margin-top:2px}
 .timeline-desc{font-size:0.74rem;color:var(--muted);margin-top:3px;line-height:1.45}
 
 /* AI reasoning */
@@ -191,13 +193,13 @@
   padding:0.9rem 1.1rem;display:flex;align-items:center;gap:0.8rem;cursor:pointer;transition:border-color .2s ease-out,box-shadow .2s ease-out;
 }
 .alt-card:hover{border-color:var(--rule-strong);box-shadow:var(--shadow-sm)}
-.alt-rank{width:28px;height:28px;border-radius:50%;background:var(--accent-muted);display:flex;align-items:center;justify-content:center;font-size:0.78rem;font-weight:600;color:var(--accent);flex-shrink:0;font-family:var(--font-mono)}
+.alt-rank{width:28px;height:28px;border-radius:50%;background:var(--accent-muted);display:flex;align-items:center;justify-content:center;font-size:0.74rem;font-weight:600;color:var(--accent);flex-shrink:0;font-family:var(--font-mono)}
 .alt-info{flex:1;min-width:0}
 .alt-route{font-size:0.82rem;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap}
 .alt-route .sep{color:var(--muted-light);font-size:0.7rem}
 .alt-meta{font-size:0.72rem;color:var(--muted);margin-top:3px;display:flex;gap:0.8rem;flex-wrap:wrap}
 .alt-cost{text-align:right;flex-shrink:0}
-.alt-cost b{font-family:var(--font-mono);font-size:0.92rem;color:var(--accent);font-weight:600}
+.alt-cost b{font-family:var(--font-mono);font-size:0.88rem;color:var(--accent);font-weight:600}
 .alt-cost span{font-size:0.66rem;color:var(--muted);display:block}
 
 /* ===== 全部路线价格对比表 ===== */
@@ -215,9 +217,9 @@
 .all-routes-table tbody td{padding:0.55rem 0.7rem;color:var(--ink);vertical-align:middle}
 .all-routes-table .route-cell{font-weight:600;font-size:0.78rem}
 .all-routes-table .route-cell .sep{color:var(--muted-light);font-size:0.68rem;margin:0 2px}
-.all-routes-table .cost-cell{font-family:var(--font-mono);font-weight:600;color:var(--accent);text-align:right;white-space:nowrap}
-.all-routes-table .days-cell{font-family:var(--font-mono);color:var(--muted);text-align:center;white-space:nowrap}
-.all-routes-table .score-cell{font-family:var(--font-mono);font-weight:600;text-align:center}
+.all-routes-table .cost-cell{font-family:var(--font-mono);font-size:0.85rem;font-weight:600;color:var(--accent);text-align:right;white-space:nowrap}
+.all-routes-table .days-cell{font-family:var(--font-mono);font-size:0.85rem;color:var(--muted);text-align:center;white-space:nowrap}
+.all-routes-table .score-cell{font-family:var(--font-mono);font-size:0.85rem;font-weight:600;text-align:center}
 .all-routes-table .source-tag{font-family:var(--font-mono);font-size:0.6rem;font-weight:600;padding:1px 6px;border-radius:3px;letter-spacing:0.03em;white-space:nowrap}
 .source-rule{background:rgba(22,163,74,0.08);color:var(--success)}
 .source-llm{background:rgba(37,99,235,0.1);color:#2563eb}

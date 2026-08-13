@@ -3,7 +3,7 @@ LLM客户端 — 基于真实数据构建富Prompt，调用LLM生成推荐方案
 当无API Key时自动降级为规则引擎
 
 推荐算法（v3）：
-1. 读取《各工厂最大订单数》表格，根据手套数量过滤产能足够的工厂
+1. 读取《工厂分配区间规则》，按物料大类 + 箱数（千支）选择发货工厂
 2. 从11个国内始发港中，按《海运费参考标准》海运费选出到终到港最便宜的5个
 3. 枚举所有 工厂×始发港 路线，逐条计算全费用，按总价排序
 """
@@ -18,12 +18,12 @@ from datetime import datetime, timedelta
 from config import (
     LLM_API_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT, LLM_ENABLED,
     NORTH_AMERICA, FDA_COUNTRIES,
-    FACTORY_MAX_ORDERS_FILE, DOMESTIC_ORIGIN_PORTS, FACTORY_MAX_ORDER_NAME_MAP,
+    FACTORY_ALLOCATION_FILE, DOMESTIC_ORIGIN_PORTS, FACTORY_ALLOCATION_NAME_MAP,
     CONTRACT_FREIGHT_FILE, CONTRACT_BOX_COLUMNS,
     CNY_TO_USD, USD_TO_CNY,
 )
 from knowledge_base import KnowledgeBase
-from cost_calculator import CostCalculator
+from cost_calculator import CostCalculator, F_TERMS
 
 
 # ===== 合约海运费缓存 =====
@@ -201,32 +201,35 @@ class LLMClient:
     # ===== v3 推荐算法核心 =====
 
     def _load_max_orders(self):
-        """加载各工厂最大订单数.xlsx（延迟加载+缓存）"""
+        """加载工厂分配区间规则.xlsx（工厂分配规则页，延迟加载+缓存）"""
         if self._max_orders_df is not None:
             return self._max_orders_df
-        if not os.path.exists(FACTORY_MAX_ORDERS_FILE):
-            print(f"[工厂产能] 文件不存在: {FACTORY_MAX_ORDERS_FILE}")
+        if not os.path.exists(FACTORY_ALLOCATION_FILE):
+            print(f"[工厂分配] 文件不存在: {FACTORY_ALLOCATION_FILE}")
             self._max_orders_df = pd.DataFrame()
             return self._max_orders_df
         try:
-            df = pd.read_excel(FACTORY_MAX_ORDERS_FILE, sheet_name=0)
-            # 跳过合计行（如有）
-            if '公司' in df.columns:
-                df = df[~df['公司'].astype(str).str.contains('合计')].copy()
-            for col in ['PVC手套', '丁腈手套']:
+            try:
+                df = pd.read_excel(FACTORY_ALLOCATION_FILE, sheet_name="工厂分配规则")
+            except Exception:
+                df = pd.read_excel(FACTORY_ALLOCATION_FILE, sheet_name=0)
+            for col in ['箱数下限', '箱数上限']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+            for col in ['物料大类', '首选工厂', '备选工厂1', '备选工厂2']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.strip()
             self._max_orders_df = df
-            print(f"[工厂产能] 加载: {df.shape[0]} 家工厂, 列: {df.columns.tolist()}")
+            print(f"[工厂分配] 加载: {df.shape[0]} 条区间规则, 列: {df.columns.tolist()}")
             return df
         except Exception as e:
-            print(f"[工厂产能] 加载失败: {e}")
+            print(f"[工厂分配] 加载失败: {e}")
             self._max_orders_df = pd.DataFrame()
             return self._max_orders_df
 
     def _find_factories_by_capacity(self, product_type, glove_qty, glove_unit='千支'):
         """
-        Step 1: 根据《各工厂最大订单数》过滤产能足够的工厂
+        Step 1: 根据《工厂分配区间规则》按物料大类 + 箱数（千支）选择发货工厂
 
         :param product_type: 产品类型（可能包含多个，如 "丁腈手套,PVC手套"）
         :param glove_qty: 手套数量（数值）
@@ -235,55 +238,88 @@ class LLMClient:
         """
         df = self._load_max_orders()
         if df.empty:
-            print("[产能过滤] 工厂产能数据为空，回退到知识库工厂列表")
+            print("[工厂分配] 规则数据为空，回退到知识库工厂列表")
             result = []
             for name, info in self.kb.factory_info.items():
                 if info.get("region") == "国内":
                     result.append({"name": name, "info": info, "capacity": 0})
             return result
 
-        # 确定产品类型对应的产能列
-        # productType 可能是 "丁腈手套" 或 "丁腈手套,PVC手套"（多选时逗号分隔）
+        if '物料大类' not in df.columns:
+            print("[工厂分配] 规则表缺少物料大类列，回退到知识库工厂列表")
+            result = []
+            for name, info in self.kb.factory_info.items():
+                if info.get("region") == "国内":
+                    result.append({"name": name, "info": info, "capacity": 0})
+            return result
+
         product_types = [p.strip() for p in product_type.split(',') if p.strip()]
         primary_product = product_types[0] if product_types else product_type
+        category = "PE手套" if primary_product == "PE产品" else primary_product
 
-        if "PVC" in primary_product:
-            capacity_col = "PVC手套"
-        else:
-            capacity_col = "丁腈手套"
+        rule_rows = df[df['物料大类'] == category]
+        if rule_rows.empty:
+            print(f"[工厂分配] 物料大类 {category} 无匹配规则，回退到知识库工厂列表")
+            result = []
+            for name, info in self.kb.factory_info.items():
+                if info.get("region") == "国内":
+                    result.append({"name": name, "info": info, "capacity": 0})
+            return result
 
         unit_factor = GLOVE_UNIT_TO_THOUSAND_PCS.get(str(glove_unit).strip(), 1.0)
-        glove_qty_thousand = glove_qty * unit_factor
-        print(f"[产能过滤] 产品={primary_product}, 数量={glove_qty}{glove_unit} -> {glove_qty_thousand}千只, 产能列={capacity_col}")
+        box_count = glove_qty * unit_factor
+        print(f"[工厂分配] 产品={category}, 数量={glove_qty}{glove_unit} -> {box_count}箱（千支）")
+
+        matched_row = None
+        for _, row in rule_rows.iterrows():
+            try:
+                lower = float(row.get('箱数下限') or 0)
+                upper = float(row.get('箱数上限') or 999999)
+            except (TypeError, ValueError):
+                continue
+            if lower <= box_count <= upper:
+                matched_row = row
+                break
+
+        if matched_row is None:
+            print(f"[工厂分配] 箱数 {box_count} 未命中区间，回退到知识库工厂列表")
+            result = []
+            for name, info in self.kb.factory_info.items():
+                if info.get("region") == "国内":
+                    result.append({"name": name, "info": info, "capacity": 0})
+            return result
 
         eligible = []
-        for _, row in df.iterrows():
-            company = str(row['公司']).strip()
-            capacity = row.get(capacity_col, 0)
-
-            if pd.isna(capacity) or capacity <= 0:
+        seen = set()
+        candidates = [
+            matched_row.get('首选工厂'),
+            matched_row.get('备选工厂1'),
+            matched_row.get('备选工厂2'),
+        ]
+        for rank, raw_name in enumerate(candidates, 1):
+            if pd.isna(raw_name):
                 continue
-
-            # 产能足够
-            if glove_qty_thousand > 0 and glove_qty_thousand > capacity:
-                print(f"  跳过 {company}: 产能={capacity}千只, 需求={glove_qty_thousand}千只")
+            name = str(raw_name).strip()
+            if not name or name == 'nan':
                 continue
-
-            # 映射到内部工厂名
-            internal_name = FACTORY_MAX_ORDER_NAME_MAP.get(company, company)
+            internal_name = FACTORY_ALLOCATION_NAME_MAP.get(name, name)
             info = self.kb.factory_info.get(internal_name)
             if info is None:
-                print(f"  警告: {company} -> {internal_name} 未在知识库中找到")
+                print(f"[工厂分配] 跳过 {name} -> {internal_name} 未在知识库中找到")
                 continue
-
+            if internal_name in seen:
+                continue
+            seen.add(internal_name)
             eligible.append({
                 "name": internal_name,
                 "info": info,
-                "capacity": float(capacity),
+                "capacity": 0.0,
+                "allocation_rank": rank,
+                "allocation_basis": str(matched_row.get('分配依据', '') or ''),
             })
-            print(f"  入选 {company} -> {internal_name}: 产能={capacity}")
+            print(f"[工厂分配] 入选 {name} -> {internal_name}: 优先级={rank}")
 
-        print(f"[产能过滤] 结果: {len(eligible)}/{df.shape[0]} 家工厂入选")
+        print(f"[工厂分配] 结果: {len(eligible)} 家工厂入选")
         return eligible
 
     def _find_top_5_origin_ports(self, dest_port, box_type):
@@ -420,6 +456,102 @@ class LLMClient:
 
         return top_5
 
+    def _get_origin_port_contract_info(self, origin_port, dest_port, box_type):
+        """获取《海运费参考标准》中 始发港+终到港+箱型 的海运费报价，不存在时返回 None"""
+        contract_df = _load_contract_df()
+        if contract_df.empty or '起运港' not in contract_df.columns or '目的港' not in contract_df.columns:
+            return None
+
+        origin_mask = contract_df['起运港'].apply(lambda x: _contract_port_match(x, origin_port))
+        dest_mask = contract_df['目的港'].apply(lambda x: _contract_port_match(x, dest_port))
+
+        bt = str(box_type).strip().upper()
+        if bt in ('40HC', '40HQ'):
+            box_col = '40HC报价'
+        elif bt in ('45HC', '45HQ'):
+            box_col = '45HC报价'
+        elif bt in ('20GP', '20HQ'):
+            box_col = '20GP报价'
+        elif bt == '40GP':
+            box_col = '40GP报价'
+        elif bt == '40NOR':
+            box_col = '40GP报价'
+        else:
+            box_col = '40HC报价'
+
+        if box_col not in contract_df.columns:
+            return None
+
+        matched = contract_df[origin_mask & dest_mask & contract_df[box_col].notna() & (contract_df[box_col] > 0)]
+        if matched.empty:
+            return None
+
+        valid_matched = []
+        today = pd.Timestamp.now().normalize()
+        for _, row in matched.iterrows():
+            effective_from = row.get('合约生效日期')
+            effective_to = row.get('合约失效日期')
+            is_valid = True
+            if pd.notna(effective_from) and today < effective_from:
+                is_valid = False
+            if pd.notna(effective_to) and today > effective_to:
+                is_valid = False
+            raw_currency = row.get('币种', 'USD')
+            currency = 'USD' if pd.isna(raw_currency) else (str(raw_currency).strip().upper() or 'USD')
+            valid_matched.append({
+                'rate': float(row[box_col]),
+                'is_valid': is_valid,
+                'carrier': str(row.get('船公司简称', '')),
+                'currency': currency,
+            })
+
+        valid_rates = [m for m in valid_matched if m['is_valid']]
+        best = min(valid_rates, key=lambda x: x['rate']) if valid_rates else min(valid_matched, key=lambda x: x['rate'])
+        rate_usd = best['rate']
+        currency = best['currency']
+        rate_cny = round(rate_usd * USD_TO_CNY, 2) if currency == 'USD' else round(rate_usd, 2)
+
+        return {
+            "port": origin_port,
+            "port_cn": origin_port.split("/")[0] if "/" in origin_port else origin_port,
+            "rate_cny": rate_cny,
+            "rate_usd": rate_usd,
+            "carrier": best['carrier'],
+            "currency": currency,
+            "is_valid": best['is_valid'],
+            "note": f"{best['carrier']} {currency} {rate_usd}/{CONTRACT_BOX_COLUMNS.get(box_type, box_col)}",
+        }
+
+    def _get_factory_route_ports(self, factory_name, dest_port, box_type, ocean_needed, top_5_by_port):
+        """生成某工厂的可用始发港路线；需要海运费时只保留有报价的历史港"""
+        history_ports = [fp for fp in self.kb.factory_ports.get(factory_name, []) if fp.get("count", 0) > 0]
+        route_ports = []
+        if history_ports:
+            if ocean_needed:
+                for fp in history_ports:
+                    contract_info = self._get_origin_port_contract_info(fp["port"], dest_port, box_type)
+                    if contract_info:
+                        route_ports.append((contract_info, True, int(fp.get("count", 0))))
+            else:
+                for fp in history_ports:
+                    origin_port = fp["port"]
+                    port_info = top_5_by_port.get(origin_port)
+                    if port_info is None:
+                        port_info = {
+                            "port": origin_port,
+                            "port_cn": origin_port.split("/")[0] if "/" in origin_port else origin_port,
+                            "rate_cny": 0,
+                            "rate_usd": 0,
+                            "carrier": "",
+                            "currency": "USD",
+                            "is_valid": False,
+                            "note": "工厂历史常用港（无合约报价）",
+                        }
+                    route_ports.append((port_info, True, int(fp.get("count", 0))))
+        else:
+            route_ports = []
+        return route_ports
+
     def _apply_modified_cost_items(self, cost, input_data):
         """重新优化：按用户在前端手动修改后的费用覆盖各候选路线的费用项，并重算总额"""
         cost_info = input_data.get("costInfo") or {}
@@ -459,8 +591,8 @@ class LLMClient:
         """
         v3 算法：生成候选方案列表
 
-        1. 工厂过滤：读取《各工厂最大订单数》，按手套数量过滤产能足够的工厂
-        2. 始发港选择：从11个国内始发港中，按合约海运费选出到终到港最便宜的5个
+        1. 工厂过滤：读取《工厂分配区间规则》，按物料大类 + 箱数（千支）选择发货工厂
+        2. 始发港选择：首选/备选1/备选2 工厂全部参与，各自取《港口发货明细》中的历史常用港；需要海运费时仅保留《海运费参考标准》有报价的路线，无历史数据时不生成该工厂路线，整体候选为0时退回合约海运费Top5
         3. 路线枚举：所有 工厂 × 始发港 组合，逐条计算全费用（陆运+港杂+海运+报关等）
         4. 按总费用排序返回
         """
@@ -499,16 +631,34 @@ class LLMClient:
         if not top_5_ports:
             print("[候选生成] 无匹配的始发港！")
             return []
+        top_5_by_port = {p["port"]: p for p in top_5_ports}
 
         # ===== Step 3: 枚举所有 工厂 × 始发港 路线 =====
+        ocean_needed = trade_term not in F_TERMS
+        factory_route_lists = []
+        for factory in factories:
+            factory_name = factory["name"]
+            route_ports = self._get_factory_route_ports(
+                factory_name, dest_port, box_type, ocean_needed, top_5_by_port,
+            )
+            factory_route_lists.append((factory, route_ports))
+
+        # 历史常用港均无海运费报价时，退回合约海运费Top5
+        if ocean_needed and all(not route_ports for _, route_ports in factory_route_lists):
+            print("[候选生成] 历史常用港均无海运费报价，退回合约海运费Top5")
+            factory_route_lists = [
+                (factory, [(pi, False, 0) for pi in top_5_ports])
+                for factory, _ in factory_route_lists
+            ]
+
         candidates = []
         seen_routes = set()
 
-        for factory in factories:
+        for factory, route_ports in factory_route_lists:
             factory_name = factory["name"]
             info = factory["info"]
 
-            for port_info in top_5_ports:
+            for port_info, is_history, history_count in route_ports:
                 origin_port = port_info["port"]
                 origin_port_cn = port_info.get("port_cn", origin_port)
 
@@ -557,8 +707,8 @@ class LLMClient:
                     "region": info["region"],
                     "origin_port": origin_port,
                     "origin_port_cn": origin_port_cn,
-                    "origin_port_source": "contract_freight_top5",
-                    "origin_port_history_count": 0,
+                    "origin_port_source": "factory_history" if is_history else "contract_freight_top5",
+                    "origin_port_history_count": history_count,
                     "dest_port": dest_port,
                     "trade_term": trade_term,
                     "box_type": box_type,
@@ -579,6 +729,7 @@ class LLMClient:
                         "region": info["region"],
                         "province": info["province"],
                     },
+                    "allocation_rank": factory.get("allocation_rank", 99),
                 })
 
         # ===== Step 4: 归一化评分并按到货约束排序 =====
@@ -882,10 +1033,13 @@ class LLMClient:
                     "timeline": a["timeline"],
                     "carrier": a.get("carrier", {}),
                     "shippingLine": a.get("shipping_line", {}),
+                    "shippingLines": a.get("shipping_lines", {}),
+                    "factoryInfo": a.get("factory_info", {}),
                     "oceanFreightInfo": a.get("ocean_freight_info", {}),
                     "score": a["score"],
                     "pricingSource": a.get("pricing_source", "rule_engine"),
                     "dataQuality": a.get("data_quality", "medium"),
+                    "needFDA": input_data.get("destCountry") in FDA_COUNTRIES,
                 }
                 for a in alternatives
             ],
@@ -1036,6 +1190,12 @@ class LLMClient:
         box_count = input_data.get("boxCount", "")
         weight = input_data.get("weight", "")
         volume = input_data.get("volume", "")
+        dest_port = input_data.get("destPort", candidates[0]["dest_port"] if candidates else "")
+        trade_term = candidates[0]["trade_term"] if candidates else input_data.get("tradePref", "")
+        required_arrival = input_data.get("requiredArrival", "")
+        transport_pref = input_data.get("transportPref", "balanced")
+        remarks = str(input_data.get("remarks", "") or "")
+        urgent = bool(input_data.get("urgent", False)) or any(k in remarks for k in ("加急", "urgent", "URGENT"))
 
         # 知识库摘要
         kb_summary = self.kb.get_summary()
@@ -1082,6 +1242,11 @@ class LLMClient:
 - 体积：{volume} CBM
 - 货好时间：{input_data.get('cargoReady', '')}
 - 期望船期：{input_data.get('shipSchedule', '')}
+- 终到港：{dest_port}
+- 贸易条款：{trade_term}
+- 要求到货时间：{required_arrival or '无'}
+- 运输偏好：{transport_pref}
+- 是否加急：{'是' if urgent else '否'}
 
 ## 知识库摘要
 - 工厂数量：{kb_summary['total_factories']}个
@@ -1102,7 +1267,14 @@ class LLMClient:
 {''.join(candidate_info)}
 
 ## 请输出JSON格式的推荐结果
-请从候选方案中选择最优方案，并给出详细推荐理由。**选择原则：综合评分相近（差距≤3分）时，必须优先选择总费用更低的方案；运输天数相同时，没有理由为同等时效付出更高费用。** 输出格式：
+请从候选方案中选择最优方案，并给出详细推荐理由。**选择原则：
+1. 只能从候选路线中选择，禁止自行新增或虚构工厂、始发港、终到港、海运费。
+2. 优先选择工厂历史常用始发港，历史提单数越高，路线成熟度越高。
+3. 如果用户要求到货时间，优先选择能按期到达的方案；无法按期到达时，必须在 risk_warning 中明确提示。
+4. 加急时时效优先，普通场景成本优先。
+5. 综合评分相近（差距≤3分）时，必须优先选择总费用更低的方案。
+6. 运输天数没有优势时，不应为更高费用买单。
+7. 综合考虑成本、时效、路线成熟度、贸易条款合理性。** 输出格式：
 {{
   "primary_index": 0,
   "reasoning": "推荐理由（200字以内）",

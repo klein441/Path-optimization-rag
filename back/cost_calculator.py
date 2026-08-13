@@ -111,12 +111,12 @@ class CostCalculator:
         calc_details.append(f"舱单费：{manifest_per_box}元/箱 × {actual_boxes}箱 = {manifest_fee}元")
         data_quality["manifest_fee"] = "fixed"
 
-        # 4. ICS2费（欧盟入境申报费，仅欧洲国家）
+        # 4. ICS2费（欧盟/欧洲经济区入境申报费，按单固定70元）
         european_countries = ["德国", "荷兰", "英国", "法国", "意大利", "西班牙", "比利时", "波兰",
                               "瑞典", "芬兰", "丹麦", "奥地利", "爱尔兰", "葡萄牙", "希腊",
                               "捷克", "罗马尼亚", "匈牙利", "斯洛文尼亚", "爱沙尼亚", "立陶宛",
                               "克罗地亚", "拉脱维亚", "保加利亚", "斯洛伐克", "卢森堡", "马耳他",
-                              "塞浦路斯", "挪威", "瑞士"]
+                              "塞浦路斯", "挪威", "瑞士", "冰岛", "列支敦士登"]
         if dest_country in european_countries:
             ics2_fee = 70.0
             fee_items.append({
@@ -124,9 +124,9 @@ class CostCalculator:
                 "category": "海管家费用",
                 "amount_cny": ics2_fee,
                 "amount_usd": round(ics2_fee * CNY_TO_USD, 2),
-                "basis": "欧盟入境申报（按单）",
+                "basis": "欧盟/欧洲经济区入境申报（按单固定70元）",
             })
-            calc_details.append(f"ICS2费：欧盟入境申报70元/单")
+            calc_details.append(f"ICS2费：欧盟/欧洲经济区入境申报70元/单")
             data_quality["ics2_fee"] = "fixed"
 
         # 5. 陆运费（拖车费）：单箱型按箱数计算，多箱型按各箱型费率分别累加

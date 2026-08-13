@@ -2,8 +2,9 @@
  * 智能推荐结果面板
  */
 import { store } from '../state.js';
-import { calculateAllFees } from '../fees.js';
+import { calculateAllFees, applyResultToFeeData } from '../fees.js';
 import { USD_TO_CNY } from '../constants.js';
+import { fetchOceanFreightRate } from '../ocean.js';
 import FeePanel from './FeePanel.js';
 
 const TIMELINE_ICONS = {
@@ -122,6 +123,26 @@ export default {
         altCost(alt) {
             return alt.totalCostCny || (alt.cost && alt.cost.totalCny) || 0;
         },
+        selectAlternative(alt) {
+            if (!alt || !store.results.primary) return;
+            const currentPrimary = store.results.primary;
+            const alternatives = (store.results.alternatives || []).slice();
+            if (alternatives.indexOf(alt) < 0) return;
+
+            store.feeConfirmed = false;
+            store.results.primary = alt;
+            store.results.alternatives = [currentPrimary].concat(alternatives.filter(function (a) {
+                return a !== alt;
+            }));
+
+            applyResultToFeeData({ primary: alt });
+            store.ocean.realtime = false;
+            store.ocean.loading = false;
+            store.ocean.error = false;
+            store.ocean.carriers = [];
+            fetchOceanFreightRate();
+            store.metaText = '已切换方案';
+        },
         openAllRoutes() {
             try {
                 localStorage.setItem('allRoutesData', JSON.stringify({
@@ -169,12 +190,6 @@ export default {
           <div class="loading-spinner"></div>
           <h3>正在生成最优路径方案</h3>
           <p>系统正在分析工厂产能、港口资源、运输成本和时效...</p>
-          <div class="loading-steps">
-            <div class="loading-step active"><span class="ls-dot"></span><span>匹配产能足够的工厂</span></div>
-            <div class="loading-step"><span class="ls-dot"></span><span>筛选海运费最便宜的5个始发港</span></div>
-            <div class="loading-step"><span class="ls-dot"></span><span>计算所有路线总费用</span></div>
-            <div class="loading-step"><span class="ls-dot"></span><span>生成最优推荐</span></div>
-          </div>
         </div>
 
         <!-- 错误状态 -->
@@ -198,7 +213,7 @@ export default {
             <div class="rib-item"><div class="rib-label">📍 终到港</div><div class="rib-value">{{ primary.destPort || '—' }}</div></div>
             <div class="rib-divider"></div>
             <div class="rib-item"><div class="rib-label">📋 贸易条款</div><div class="rib-value">{{ primary.tradeTerm || 'FOB' }}</div></div>
-            <div class="rib-item"><div class="rib-label">📦 箱型/数量</div><div class="rib-value">{{ boxInfo }}</div></div>
+            <div class="rib-item"><div class="rib-label">📦 柜型/数量</div><div class="rib-value">{{ boxInfo }}</div></div>
           </div>
 
           <!-- 路线可视化 -->
@@ -367,7 +382,7 @@ export default {
               <span class="count">{{ store.results.alternatives.length }} 个方案</span>
             </div>
             <div class="alt-list">
-              <div class="alt-card" v-for="(alt, idx) in store.results.alternatives" :key="idx">
+              <div class="alt-card" v-for="(alt, idx) in store.results.alternatives" :key="idx" @click="selectAlternative(alt, idx)">
                 <div class="alt-rank">{{ idx + 2 }}</div>
                 <div class="alt-info">
                   <div class="alt-route">

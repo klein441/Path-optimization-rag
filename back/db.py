@@ -4,11 +4,14 @@ MySQL 持久化模块 — 保存推荐输入的原始请求和推荐输出结果
 """
 import json
 import time
+import hashlib
+import os
 
 import pymysql
 import pymysql.cursors
 
 from config import (
+    USD_TO_CNY,
     DB_ENABLED,
     DB_HOST,
     DB_PORT,
@@ -31,6 +34,23 @@ def _connect():
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=True,
     )
+
+
+def _hash_password(password):
+    """生成带随机盐的密码哈希"""
+    salt = os.urandom(16).hex()
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), bytes.fromhex(salt), 100000).hex()
+    return f"{salt}${digest}"
+
+
+def _verify_password(password, stored):
+    """校验密码是否匹配存储的哈希"""
+    try:
+        salt, digest = stored.split('$', 1)
+        calc = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), bytes.fromhex(salt), 100000).hex()
+        return calc == digest
+    except (ValueError, TypeError):
+        return False
 
 
 def init_db():
@@ -57,7 +77,65 @@ def init_db():
                     KEY idx_created_at (created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS logistics_users (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    username VARCHAR(64) NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (id),
+                    UNIQUE KEY uk_username (username)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            cursor.execute("SELECT id FROM logistics_users WHERE username = %s", ("admin",))
+            if not cursor.fetchone():
+                cursor.execute(
+                    "INSERT INTO logistics_users (username, password_hash) VALUES (%s, %s)",
+                    ("admin", _hash_password("admin123")),
+                )
         return True
+    finally:
+        conn.close()
+
+
+def register_user(username, password):
+    """注册用户并写入 MySQL，返回 {"ok": bool, "error": str}"""
+    if not DB_ENABLED:
+        return {"ok": False, "error": "数据库未启用，无法注册"}
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id FROM logistics_users WHERE username = %s", (username,))
+            if cursor.fetchone():
+                return {"ok": False, "error": "用户名已存在"}
+            cursor.execute(
+                "INSERT INTO logistics_users (username, password_hash) VALUES (%s, %s)",
+                (username, _hash_password(password)),
+            )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": f"注册失败: {e}"}
+    finally:
+        conn.close()
+
+
+def verify_user(username, password):
+    """校验用户名和密码，返回 True/False"""
+    if not DB_ENABLED:
+        return False
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT password_hash FROM logistics_users WHERE username = %s",
+                (username,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+            return _verify_password(password, row.get("password_hash") or "")
+    except Exception:
+        return False
     finally:
         conn.close()
 
@@ -97,6 +175,76 @@ def save_recommendation(input_data, result):
         return True
     finally:
         conn.close()
+
+
+def update_recommendation_total(input_data, total_cny, fee_items=None):
+    """Update the latest log row for the original request with the frontend-confirmed total."""
+    if not DB_ENABLED or total_cny is None:
+        return False
+
+    input_json = json.dumps(input_data, ensure_ascii=False)
+    total = round(float(total_cny), 2)
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT id, output_data
+                FROM logistics_recommendation_log
+                WHERE input_data = %s
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (input_json,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+
+            output_data = row.get("output_data")
+            parsed = None
+            if isinstance(output_data, str):
+                try:
+                    parsed = json.loads(output_data)
+                except (TypeError, ValueError):
+                    parsed = None
+            elif isinstance(output_data, dict):
+                parsed = output_data
+
+            new_output_data = None
+            if parsed and isinstance(parsed, dict):
+                primary = parsed.get("data", {}).get("primary", {})
+                cost = primary.get("cost") if isinstance(primary, dict) else None
+                if isinstance(cost, dict):
+                    cost["totalCny"] = total
+                    cost["totalUsd"] = round(total / USD_TO_CNY, 2)
+                    cost["confirmed_by_user"] = True
+                    if fee_items is not None:
+                        cost["items"] = fee_items
+                    new_output_data = json.dumps(parsed, ensure_ascii=False)
+
+            cursor.execute(
+                """
+                UPDATE logistics_recommendation_log
+                SET total_cost = %s, output_data = COALESCE(%s, output_data)
+                WHERE id = %s
+                """,
+                (total, new_output_data, row["id"]),
+            )
+        return True
+    finally:
+        conn.close()
+
+
+def safe_update_recommendation_total(input_data, total_cny, fee_items=None):
+    """Update the confirmed fee total without breaking the confirmation flow."""
+    if not DB_ENABLED:
+        return False
+    try:
+        return update_recommendation_total(input_data, total_cny, fee_items)
+    except Exception as e:
+        print(f"[MySQL] 更新费用确认总额失败: {e}")
+        return False
 
 
 def safe_init_db():

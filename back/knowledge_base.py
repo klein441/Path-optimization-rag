@@ -35,29 +35,41 @@ class KnowledgeBase:
 
     # ===== 工厂信息 =====
     def _build_factory_info(self):
-        """基于各基地产能表 + 各工厂最大订单数构建工厂信息"""
-        cap_df = self._loader.factory_capacity
+        """基于《工厂分配区间规则》构建工厂信息"""
+        rule_df = getattr(self._loader, "allocation_rules", None)
         self.factory_capacity = {}
-        for _, row in cap_df.iterrows():
-            name = row['基地']
-            pvc_cap = row.get('PVC数量（千只数）', 0)
-            nitrile_cap = row.get('丁腈数量（千只数）', 0)
-            self.factory_capacity[name] = {
-                "pvc_capacity": float(pvc_cap),
-                "nitrile_capacity": float(nitrile_cap),
-                "total_capacity": float(row.get('总', 0)),
-            }
-
-        # 计算产能占比
-        total_pvc = sum(f["pvc_capacity"] for f in self.factory_capacity.values())
-        total_nitrile = sum(f["nitrile_capacity"] for f in self.factory_capacity.values())
-        for name in self.factory_capacity:
-            self.factory_capacity[name]["pvc_share"] = round(self.factory_capacity[name]["pvc_capacity"] / total_pvc * 100, 1) if total_pvc else 0
-            self.factory_capacity[name]["nitrile_share"] = round(self.factory_capacity[name]["nitrile_capacity"] / total_nitrile * 100, 1) if total_nitrile else 0
-
-        # 合并工厂区域信息
         self.factory_info = {}
-        for name, cap in self.factory_capacity.items():
+        if rule_df is None or rule_df.empty:
+            return
+
+        factory_names = set()
+        for col in ("首选工厂", "备选工厂1", "备选工厂2"):
+            if col not in rule_df.columns:
+                continue
+            for val in rule_df[col].dropna():
+                name = str(val).strip()
+                if name and name != "nan":
+                    factory_names.add(name)
+
+        products_by_factory = {name: set() for name in factory_names}
+        for _, row in rule_df.iterrows():
+            category = str(row.get("物料大类", "") or "")
+            if "PVC" in category:
+                product = "PVC手套"
+            elif "丁腈" in category:
+                product = "丁腈手套"
+            elif "PE" in category:
+                product = "PE产品"
+            elif "乳胶" in category:
+                product = "乳胶手套"
+            else:
+                continue
+            for col in ("首选工厂", "备选工厂1", "备选工厂2"):
+                name = str(row.get(col, "") or "")
+                if name and name in products_by_factory:
+                    products_by_factory[name].add(product)
+
+        for name in sorted(factory_names):
             region = FACTORY_REGION.get(name, {"region": "国内", "province": "未知", "default_port": "青岛/QINGDAO"})
             short = FACTORY_SHORT.get(name, name)
             self.factory_info[name] = {
@@ -66,41 +78,20 @@ class KnowledgeBase:
                 "region": region["region"],
                 "province": region["province"],
                 "default_port": region["default_port"],
-                "pvc_capacity": cap["pvc_capacity"],
-                "nitrile_capacity": cap["nitrile_capacity"],
-                "pvc_share": cap["pvc_share"],
-                "nitrile_share": cap["nitrile_share"],
-                "total_capacity": cap["total_capacity"],
+                "pvc_capacity": 0.0,
+                "nitrile_capacity": 0.0,
+                "pvc_share": 0.0,
+                "nitrile_share": 0.0,
+                "total_capacity": 0.0,
+                "products": sorted(products_by_factory.get(name, [])),
             }
-
-        # 基于各工厂最大订单数，统计各工厂实际生产的产品类型
-        material_df = self._loader.material_line
-        if '发货车间' in material_df.columns and '物料名称' in material_df.columns:
-            factory_products = {}
-            for _, row in material_df.iterrows():
-                workshop = str(row.get('发货车间', ''))
-                material = str(row.get('物料名称', ''))
-                if workshop and workshop != 'nan':
-                    factory = self._match_factory_from_workshop(workshop)
-                    if factory:
-                        if factory not in factory_products:
-                            factory_products[factory] = set()
-                        if '丁腈' in material:
-                            factory_products[factory].add('丁腈手套')
-                        elif 'PVC' in material or 'pvc' in material.lower():
-                            factory_products[factory].add('PVC手套')
-                        elif 'PE' in material or 'pe' in material.lower():
-                            factory_products[factory].add('PE产品')
-
-            for name in self.factory_info:
-                products = list(factory_products.get(name, []))
-                if not products:
-                    cap = self.factory_capacity.get(name, {})
-                    if cap.get("pvc_capacity", 0) > 1000:
-                        products.append("PVC手套")
-                    if cap.get("nitrile_capacity", 0) > 1000:
-                        products.append("丁腈手套")
-                self.factory_info[name]["products"] = products
+            self.factory_capacity[name] = {
+                "pvc_capacity": 0.0,
+                "nitrile_capacity": 0.0,
+                "total_capacity": 0.0,
+                "pvc_share": 0.0,
+                "nitrile_share": 0.0,
+            }
 
     def _match_factory_from_workshop(self, workshop):
         """从车间名匹配工厂名"""
@@ -117,31 +108,27 @@ class KnowledgeBase:
                 return factory
         return None
 
-    # ===== 港口与路线（基于拖车费数据动态推导 + 配置回退） =====
+    # ===== 港口与路线（基于港口发货明细推导 + 配置回退） =====
     def _build_port_routes(self):
-        """构建港口与路线映射（优先从拖车费Excel数据推导，配置仅作回退）"""
-        import pandas as pd
-        import os
-
-        # 1. 先从工厂到起运港拖车费 Excel 推导每个工厂的实际始发港（按运输笔数排序）
+        """根据《港口发货明细》推导工厂始发港，缺失用配置默认港补齐"""
         self.factory_ports = {}
-        try:
-            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data')
-            route_file = os.path.join(data_dir, '工厂到起运港拖车费_运输方式承运商发货工厂始发港.xlsx')
-            if os.path.exists(route_file):
-                df = pd.read_excel(route_file, sheet_name=0)
-                for factory in df['发货工厂'].unique():
-                    fdf = df[df['发货工厂'] == factory]
-                    port_stats = fdf.groupby('始发港')['运输笔数'].sum().sort_values(ascending=False)
-                    self.factory_ports[factory] = [
-                        {"port": port, "count": int(count)}
-                        for port, count in port_stats.items()
-                    ]
-                print(f"[知识库] 从拖车费数据推导 {len(self.factory_ports)} 个工厂的始发港")
-        except Exception as e:
-            print(f"[知识库] 拖车费数据加载失败，回退到配置: {e}")
+        detail = getattr(self._loader, "allocation_port_detail", None)
+        if detail is not None and not detail.empty and '始发港' in detail.columns and '发货工厂' in detail.columns:
+            count_col = '提单单数' if '提单单数' in detail.columns else ('费用记录数' if '费用记录数' in detail.columns else None)
+            for factory, grp in detail.groupby('发货工厂'):
+                if count_col and count_col in grp.columns:
+                    grp = grp.sort_values(count_col, ascending=False)
+                ports = []
+                for _, row in grp.iterrows():
+                    try:
+                        count = int(float(row.get(count_col, 0) or 0)) if count_col else 0
+                    except (TypeError, ValueError):
+                        count = 0
+                    ports.append({"port": str(row['始发港']).strip(), "count": count})
+                self.factory_ports[str(factory).strip()] = ports
+            print(f"[知识库] 从港口发货明细推导 {len(self.factory_ports)} 个工厂的始发港")
 
-        # 2. 对数据中未覆盖的工厂，用 config FACTORY_REGION 的 default_port 补充
+        # 对数据中未覆盖的工厂，用 config FACTORY_REGION 的 default_port 补充
         for factory, info in self.factory_info.items():
             if factory not in self.factory_ports or not self.factory_ports[factory]:
                 default_port = info.get("default_port", "青岛/QINGDAO")

@@ -37,7 +37,7 @@
 }
 .rib-item{display:flex;flex-direction:column;gap:0.15rem;min-width:5rem;flex:1}
 .rib-label{font-family:var(--font-mono);font-size:0.62rem;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em}
-.rib-value{font-size:0.9rem;font-weight:600;color:var(--ink);font-family:var(--font-mono)}
+.rib-value{font-size:0.92rem;font-weight:600;color:var(--ink);font-family:var(--font-mono)}
 .rib-arrow{color:var(--accent);font-size:1.1rem;font-weight:600;padding-top:10px;flex-shrink:0}
 .rib-divider{width:1px;height:32px;background:var(--rule-strong);flex-shrink:0}
 
@@ -73,7 +73,7 @@
 }
 .fee-section-icon svg{width:16px;height:16px;color:#fff}
 .fee-section-title{font-family:var(--font-display);font-size:0.92rem;font-weight:600;color:var(--ink)}
-.fee-section-summary{font-size:0.8rem;color:var(--accent);font-family:var(--font-mono);font-weight:600;margin-left:auto}
+.fee-section-summary{font-size:0.85rem;color:var(--accent);font-family:var(--font-mono);font-weight:600;margin-left:auto}
 .fee-section-arrow{width:16px;height:16px;color:var(--muted);transition:transform .2s}
 .fee-section.open .fee-section-arrow{transform:rotate(90deg)}
 .fee-section-body{display:none;padding:1.1rem 1.2rem;border-top:1px solid var(--rule)}
@@ -144,7 +144,7 @@
   margin-top:1rem;
 }
 .fee-total-label{font-family:var(--font-display);font-size:0.92rem;font-weight:600;color:var(--ink)}
-.fee-total-value{font-family:var(--font-display);font-size:1.15rem;font-weight:600;color:var(--accent);margin-left:auto}
+.fee-total-value{font-family:var(--font-display);font-size:1.05rem;font-weight:600;color:var(--accent);margin-left:auto}
 .fee-total-unit{font-size:0.8rem;color:var(--muted);margin-left:0.3rem;font-family:var(--font-mono)}
 
 /* Info badge */

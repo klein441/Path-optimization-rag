@@ -25,6 +25,7 @@ function buildPayload() {
         destPort: form.destPort,
         gloveQty: parseInt(form.gloveQty) || 0,
         gloveUnit: form.gloveUnit || '千支',
+        gloveQuantities: Object.assign({}, form.gloveQuantities),
         boxCount: totalBoxes,
         weight: totalWeight,
         volume: parseFloat(form.volume) || 0,
@@ -65,7 +66,11 @@ export async function handleSubmit() {
         return;
     }
     if (boxTypes.length === 0) {
-        alert('请选择至少一种集装箱箱型');
+        alert('请选择至少一种集装箱柜型');
+        return;
+    }
+    if (parseInt(form.gloveQty) <= 0) {
+        alert('请填写手套数量');
         return;
     }
     if (!form.destCountry) {
@@ -83,6 +88,7 @@ export async function handleSubmit() {
 
     const payload = buildPayload();
 
+    store.lastSubmitPayload = JSON.parse(JSON.stringify(payload));
     store.feeConfirmed = false;
     store.submitting = true;
     store.results.status = 'loading';

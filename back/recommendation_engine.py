@@ -52,8 +52,7 @@ class RecommendationEngine:
         # 添加引擎元信息
         result["engine"] = "data_driven_v3"
         result["data_sources"] = [
-            "各基地产能",
-            "各工厂最大订单数",
+            "工厂分配区间规则",
             "海运费参考标准",
             "港杂费标准_贸易条款承运商箱型港口",
             "工厂到起运港拖车费",

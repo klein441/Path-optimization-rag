@@ -40,7 +40,7 @@ export function selectPortMiscCarrier(carrier) {
     store.feeData.portMisc.perBoxFee = perBoxFee;
     store.feeData.portMisc.selectedCarrier = carrier;
     console.log('[港杂费] 用户选择承运商:', carrier.carrier,
-        '单箱¥' + perBoxFee + ' × ' + totalBoxes + '箱 = ¥' + fee);
+        '单柜¥' + perBoxFee + ' × ' + totalBoxes + '柜 = ¥' + fee);
 }
 
 // 选择陆运费承运商：切换后更新陆运费和高速费
@@ -57,7 +57,7 @@ export function selectLandCarrier(carrier) {
     }
     store.feeData.land.selectedCarrier = carrier;
     console.log('[陆运费] 用户选择承运商:', carrier.carrier,
-        '单箱¥' + landFee + ' × ' + totalBoxes + '箱 = ¥' + store.feeData.land.baseFreight,
+        '单柜¥' + landFee + ' × ' + totalBoxes + '柜 = ¥' + store.feeData.land.baseFreight,
         '高速费¥' + tollFee);
 }
 
@@ -114,7 +114,7 @@ export async function fetchOceanFreightRate() {
             // 自动推荐陆运费（根据推荐主路线的工厂+始发港+运输方式查询拖车费表）
             initLandFees(feeProvince, 'direct', feeFactory, origin);
 
-            // 自动推荐港杂费（根据始发港+贸易条款+箱型查询标准表）
+            // 自动推荐港杂费（根据始发港+贸易条款+柜型查询标准表）
             fetchPortMiscFee(origin, form.tradePref || '', boxTypes);
 
             updateRouteInfoCard(feeFactoryShort || feeFactory, origin, destination);
@@ -172,7 +172,7 @@ export async function fetchOceanFreightRate() {
 
         if (result.success && result.data) {
             const d = result.data;
-            // 过滤：只保留对所有选定箱型都有报价的船公司
+            // 过滤：只保留对所有选定柜型都有报价的船公司
             const allCarriers = (d.carriers || []).filter(function(c) { return c.hasAllTypes; });
             const carriers = allCarriers;
             var realCheapest = null;
@@ -230,7 +230,7 @@ export async function fetchOceanFreightRate() {
             }
 
             console.log('[海运费] 船公司比价成功:', origin, '→', destination,
-                allCarriers.length + '家(全箱型' + carriers.length + '家), 最低: ' + (realCheapest ? realCheapest.carrier + ' ¥' + realCheapest.totalCny : '无'));
+                allCarriers.length + '家(全柜型' + carriers.length + '家), 最低: ' + (realCheapest ? realCheapest.carrier + ' ¥' + realCheapest.totalCny : '无'));
         } else {
             throw new Error(result.error || '未获取到海运费报价数据');
         }
@@ -241,7 +241,7 @@ export async function fetchOceanFreightRate() {
 
         const msg = e.message || '';
         if (msg.includes('未找到匹配') || msg.includes('未匹配') || msg.includes('404')) {
-            store.ocean.errorDesc = '该航线未在合约文件中找到匹配报价，请调整港口/箱型，或手动输入海运费金额';
+            store.ocean.errorDesc = '该航线未在合约文件中找到匹配报价，请调整港口/柜型，或手动输入海运费金额';
         } else if (msg.includes('文件未找到') || msg.includes('加载失败')) {
             store.ocean.errorDesc = '合约运费文件加载失败，请确认文件存在或手动输入海运费';
         } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {

@@ -84,7 +84,7 @@
 }
 .fee-confirmed-banner svg{flex:0 0 auto;color:#2563EB}
 .fee-confirmed-title{font-size:0.82rem;font-weight:700;color:#1D4ED8}
-.fee-confirmed-total{font-size:1.05rem;font-weight:700;color:#1D4ED8;font-family:var(--font-display)}
+.fee-confirmed-total{font-size:1rem;font-weight:700;color:#1D4ED8;font-family:var(--font-display)}
 /* ===== 锁定状态 ===== */
 .fee-panel-in-results input:disabled,
 .fee-panel-in-results select:disabled{opacity:0.55;cursor:not-allowed;background:var(--surface-muted)}
