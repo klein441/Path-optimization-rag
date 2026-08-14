@@ -101,6 +101,13 @@
 .ocean-quote-card.cheapest .ocean-quote-carrier{color:var(--accent)}
 .ocean-quote-card.cheapest .ocean-quote-price{color:var(--accent)}
 
+/* 陆运费承运商：只有用户选中的才标绿，最低价不再自动标绿 */
+.ocean-quote-card.land-carrier-card.cheapest{
+  background:var(--surface);
+}
+.ocean-quote-card.land-carrier-card.cheapest .ocean-quote-carrier{color:var(--ink)}
+.ocean-quote-card.land-carrier-card.cheapest .ocean-quote-price{color:var(--accent)}
+
 /* 选中状态：绿色边框 + 浅绿背景 + 阴影 */
 .ocean-quote-card.selected{
   background:#f0fdf4;border-color:#22c55e;box-shadow:0 2px 14px rgba(34,197,94,0.18);

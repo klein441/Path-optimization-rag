@@ -3,6 +3,7 @@
  */
 import { API_BASE } from './constants.js';
 import { store } from './state.js';
+import { getLandBoxTypes, applyLandFreightTotal } from './utils.js';
 
 async function getJSON(url) {
     const resp = await fetch(url);
@@ -137,49 +138,72 @@ export async function fetchPortMiscFee(originPort, tradeTerm, boxTypes) {
 // ===== 陆运费推荐（从工厂到起运港拖车费表实时查询）=====
 export async function fetchLandFreightFromRoute(factoryName, originPort, transportMode) {
     if (!factoryName || !originPort) return;
-    var boxTypes = store.form.boxTypes.slice();
-    var bt = (boxTypes && boxTypes.length > 0) ? boxTypes[0] : '40HQ';
-    var ld = store.feeData.land;
+    const boxTypes = getLandBoxTypes();
+    const ld = store.feeData.land;
     ld.loading = true;
     ld.error = false;
+    ld.recommendedRatesByType = {};
+    ld.selectedRatesByType = {};
+    ld.selectedCarrierByType = {};
+    ld.carriers = [];
+    ld.totalMatched = 0;
     try {
-        const result = await apiLandFreight(factoryName, originPort, transportMode, bt);
-        if (result.success && result.data) {
-            var d = result.data;
-            var landFee = d.recommendedLandFreight;
-            var tollFeeRec = d.recommendedTollFreight || 0;
-            if (landFee > 0) {
-                var totalBoxes = parseInt(store.form.boxes) || 1;
-                store.feeData.land.baseFreight = Math.round(landFee * totalBoxes * 100) / 100;
-                store.feeData.land.perBoxFee = landFee;
+        const results = await Promise.all(boxTypes.map(bt => apiLandFreight(factoryName, originPort, transportMode, bt)));
+        let hasSuccess = false;
+        let hasError = false;
+        let totalToll = 0;
+        let bestCarrier = '';
+        let allQuotes = [];
+        results.forEach((result, idx) => {
+            const bt = boxTypes[idx];
+            if (result && result.success && result.data) {
+                hasSuccess = true;
+                const d = result.data;
+                const rate = parseFloat(d.recommendedLandFreight) || 0;
+                ld.recommendedRatesByType[bt] = rate;
+                ld.selectedRatesByType[bt] = rate;
+                (d.allQuotes || []).forEach(q => {
+                    if (!q.carrier) return;
+                    allQuotes.push(Object.assign({}, q, { boxType: bt }));
+                });
+                const recommendedQuote = (d.allQuotes || []).find(q => q.carrier === d.recommendedCarrier) || (d.allQuotes || [])[0];
+                if (recommendedQuote) {
+                    ld.selectedCarrierByType[bt] = Object.assign({}, recommendedQuote, { boxType: bt });
+                }
+                totalToll += parseFloat(d.recommendedTollFreight) || 0;
+                if (!bestCarrier) bestCarrier = d.recommendedCarrier || '';
+                ld.totalMatched += d.totalMatched || 0;
+            } else {
+                hasError = true;
             }
-            if (tollFeeRec > 0) store.feeData.land.tollFee = tollFeeRec;
-            // 承运商推荐数据
-            ld.bestCarrier = d.recommendedCarrier || '';
-            ld.carriers = d.allQuotes || [];
-            ld.totalMatched = d.totalMatched || 0;
+        });
+        if (hasSuccess) {
+            ld.bestCarrier = bestCarrier;
+            ld.carriers = allQuotes;
             ld.source = '工厂到起运港拖车费_运输方式承运商发货工厂始发港.xlsx';
+            if (totalToll > 0) ld.tollFee = totalToll;
+            applyLandFreightTotal();
             // 自动选中后端按加权中位数推荐的承运商
-            var recCarrier = d.recommendedCarrier || '';
+            const recCarrier = bestCarrier || '';
             ld.selectedCarrier = null;
-            for (var i = 0; i < ld.carriers.length; i++) {
+            for (let i = 0; i < ld.carriers.length; i++) {
                 if (ld.carriers[i].carrier === recCarrier) {
                     ld.selectedCarrier = ld.carriers[i];
                     break;
                 }
             }
             if (!ld.selectedCarrier && ld.carriers.length > 0) ld.selectedCarrier = ld.carriers[0];
-            ld.error = false;
+            ld.error = hasError;
             console.log('[陆运费] 路线报价卡推荐:', factoryName, originPort, transportMode,
-                '陆运费¥' + landFee, '高速费¥' + tollFeeRec,
+                '陆运费¥' + store.feeData.land.baseFreight, '高速费¥' + totalToll,
                 '| 承运商:', ld.bestCarrier,
-                '(Sheet: ' + d.sheetName + ', ' + d.totalMatched + '条记录)');
+                '(Sheet: 工厂到起运港拖车费_运输方式承运商发货工厂始发港.xlsx, ' + ld.totalMatched + '条记录)');
         } else {
             ld.error = true;
             ld.carriers = [];
             ld.bestCarrier = '';
             ld.selectedCarrier = null;
-            console.warn('[陆运费] 路线报价卡未匹配:', result.error || '无数据，使用默认值');
+            console.warn('[陆运费] 路线报价卡未匹配:', hasError ? '部分箱型无数据' : '无数据，使用默认值');
         }
     } catch (e) {
         console.warn('[陆运费] 查询失败:', e.message);

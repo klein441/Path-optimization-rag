@@ -6,7 +6,7 @@
 import { store } from './state.js';
 import { apiRouteInfo, apiFreightRateCompare, fetchPortMiscFee } from './api.js';
 import { initLandFees } from './fees.js';
-import { getFallbackFactory, getOceanPortsByCountry, showNotification, isFTradeTerm } from './utils.js';
+import { getFallbackFactory, getOceanPortsByCountry, showNotification, isFTradeTerm, applyLandFreightTotal } from './utils.js';
 
 export function updateRouteInfoCard(factory, originPort, destPort) {
     store.routeInfoCard.factory = factory || '—';
@@ -47,17 +47,26 @@ export function selectPortMiscCarrier(carrier) {
 export function selectLandCarrier(carrier) {
     if (!carrier) return;
     if (store.feeConfirmed) return;
-    var landFee = carrier.landFreightMedian || 0;
+    var ld = store.feeData.land;
     var tollFee = carrier.tollFreightMedian || 0;
-    var totalBoxes = parseInt(store.form.boxes) || 1;
-    store.feeData.land.baseFreight = Math.round(landFee * totalBoxes * 100) / 100;
-    store.feeData.land.perBoxFee = landFee;
-    if (store.feeData.land.tollEnabled && tollFee > 0) {
-        store.feeData.land.tollFee = tollFee;
+    if (carrier.boxType) {
+        ld.selectedRatesByType[carrier.boxType] = parseFloat(carrier.landFreightMedian) || 0;
+        ld.selectedCarrierByType[carrier.boxType] = carrier;
+        ld.selectedCarrier = carrier;
+        applyLandFreightTotal();
+    } else {
+        var landFee = carrier.landFreightMedian || 0;
+        var totalBoxes = parseInt(store.form.boxes) || 1;
+        ld.baseFreight = Math.round(landFee * totalBoxes * 100) / 100;
+        ld.perBoxFee = landFee;
+        ld.selectedCarrier = carrier;
     }
-    store.feeData.land.selectedCarrier = carrier;
+    if (ld.tollEnabled && tollFee > 0) {
+        ld.tollFee = tollFee;
+    }
     console.log('[陆运费] 用户选择承运商:', carrier.carrier,
-        '单柜¥' + landFee + ' × ' + totalBoxes + '柜 = ¥' + store.feeData.land.baseFreight,
+        (carrier.boxType ? carrier.boxType + '单柜¥' + carrier.landFreightMedian : ''),
+        '合计¥' + store.feeData.land.baseFreight,
         '高速费¥' + tollFee);
 }
 

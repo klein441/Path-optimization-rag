@@ -122,6 +122,16 @@ export default {
         onInsideToggle(ev) {
             store.feeData.land.insideLoadEnabled = ev.target.checked;
         },
+        isLandCarrierSelected(c) {
+            const selected = (store.feeData.land.selectedCarrierByType || {})[c.boxType || ''];
+            return Boolean(selected && selected.carrier === c.carrier);
+        },
+        isLandCarrierCheapest(c) {
+            const quotes = store.feeData.land.carriers.filter(q => q.boxType === c.boxType && q.landFreightMedian > 0);
+            if (quotes.length === 0) return false;
+            const min = Math.min.apply(null, quotes.map(q => q.landFreightMedian));
+            return c.landFreightMedian === min;
+        },
     },
     template: `
         <div id="feePanelInResults" class="fee-panel-in-results">
@@ -172,19 +182,17 @@ export default {
                     各承运商拖车费报价
                   </div>
                   <div class="ocean-quotes-grid">
-                    <div v-for="(c, idx) in store.feeData.land.carriers" :key="c.carrier"
-                         class="ocean-quote-card"
-                         :class="{ cheapest: idx === 0, selected: store.feeData.land.selectedCarrier && store.feeData.land.selectedCarrier.carrier === c.carrier, disabled: store.feeConfirmed }"
+                    <div v-for="c in store.feeData.land.carriers" :key="(c.carrier || '') + '-' + (c.boxType || '')"
+                         class="ocean-quote-card land-carrier-card"
+                         :class="{ cheapest: isLandCarrierCheapest(c), selected: isLandCarrierSelected(c), disabled: store.feeConfirmed }"
                          @click="selectLandCarrierHandler(c)">
                       <div class="ocean-quote-card-top">
-                        <div class="ocean-quote-carrier"><span v-if="idx === 0" class="star-icon">⭐</span>{{ c.carrier }}</div>
+                        <div class="ocean-quote-carrier"><span v-if="isLandCarrierCheapest(c)" class="star-icon">⭐</span>{{ c.carrier }}</div>
                         <div class="ocean-quote-price">¥{{ c.landFreightMedian }}<span style="font-size:11px;font-weight:400;color:#94a3b8">/柜</span></div>
                       </div>
                       <div class="ocean-quote-card-meta">
-                        <span>样本{{ c.sampleCount || 0 }}</span>
-                        <span class="meta-sep" v-if="c.tollFreightMedian > 0">·</span>
                         <span v-if="c.tollFreightMedian > 0">高速费¥{{ c.tollFreightMedian }}</span>
-                        <span class="meta-sep" v-if="c.boxType">·</span>
+                        <span class="meta-sep" v-if="c.tollFreightMedian > 0 && c.boxType">·</span>
                         <span v-if="c.boxType">{{ c.boxType }}</span>
                       </div>
                     </div>
@@ -293,8 +301,6 @@ export default {
                       </div>
                       <div class="ocean-quote-card-meta">
                         <span class="valid-badge ok">{{ c.dataLevel || '—' }}</span>
-                        <span class="meta-sep">·</span>
-                        <span>样本{{ c.sampleCount || 0 }}</span>
                         <span class="meta-sep">·</span>
                         <span>¥{{ c.lowerBound }}~¥{{ c.upperBound }}</span>
                       </div>

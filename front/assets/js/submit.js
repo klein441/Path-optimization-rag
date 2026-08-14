@@ -9,9 +9,8 @@ function buildPayload() {
     const form = store.form;
     const productTypes = form.productTypes.slice();
     const boxTypes = form.boxTypes.slice();
-    const weightPerBox = parseFloat(form.weightPerBox) || 15;
     const totalBoxes = parseInt(form.boxes) || 0;
-    const totalWeight = Math.round(weightPerBox * totalBoxes);
+    const totalWeight = Math.round(parseFloat(form.weight) || 0);
 
     return {
         customer: form.customer,

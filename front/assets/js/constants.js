@@ -30,6 +30,18 @@ export const PRODUCT_OPTIONS = [
     { value: 'PVC手套',  label: 'PVC手套' },
 ];
 
+// ===== 英科医疗手套常规克重（kg/千支），按尺码区分 =====
+export const GLOVE_WEIGHT_KG_PER_THOUSAND = {
+    '丁腈手套': { S: 3.5, M: 4.0, L: 4.5, XL: 5.0 },
+    'PVC手套':  { S: 4.0, M: 4.5, L: 5.0, XL: 5.5 },
+};
+
+// ===== 手套数量单位 -> 千支换算系数 =====
+export const GLOVE_UNIT_TO_THOUSAND = {
+    '千支': 1,
+    '八百支': 0.8,
+};
+
 // ===== 柜型选项（含展示标签）=====
 export const BOX_TYPE_OPTIONS = [
     { value: '20GP',  label: '20GP（20英尺标准柜 · 33.1m³）' },

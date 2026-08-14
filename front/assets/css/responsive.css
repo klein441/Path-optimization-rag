@@ -6,7 +6,6 @@
   .app-main{grid-template-columns:1fr;padding:1.5rem}
   .rec-grid{grid-template-columns:repeat(2,1fr)}
   .header-right{display:none}
-  .header-stat{display:none}
 }
 @media(max-width:520px){
   .form-grid{grid-template-columns:1fr}

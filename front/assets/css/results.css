@@ -156,7 +156,7 @@
 .timeline-header svg{width:16px;height:16px;color:var(--accent)}
 .timeline{position:relative;display:flex;align-items:flex-start;padding:0 2px}
 .timeline-item{flex:1;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;min-width:0}
-.timeline-item:not(:first-child)::before{content:'';position:absolute;top:11px;left:0;width:50%;height:2px;background:var(--rule-strong)}
+.timeline-item:not(:first-child)::before{content:'';position:absolute;top:11px;left:-50%;right:50%;height:2px;background:var(--rule-strong)}
 .timeline-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:2px solid var(--accent);background:var(--surface);z-index:1}
 .timeline-dot svg{width:12px;height:12px;color:var(--accent)}
 .timeline-dot.done{background:var(--accent)}

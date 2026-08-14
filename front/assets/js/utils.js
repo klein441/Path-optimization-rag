@@ -59,6 +59,34 @@ export function getOriginPortByProvince(province) {
     return PROVINCE_PORT_MAP[province] || '上海/SHANGHAI';
 }
 
+// 返回当前选中的柜型列表，未选时按 40HQ 兜底
+export function getLandBoxTypes() {
+    const types = store.form.boxTypes.slice();
+    return types.length > 0 ? types : ['40HQ'];
+}
+
+// 按各柜型的推荐/已选单柜陆运费分别累加，得到拖车费总额
+export function getLandFreightTotal() {
+    const ld = store.feeData.land;
+    const selected = ld.selectedRatesByType || {};
+    const recommended = ld.recommendedRatesByType || {};
+    let total = 0;
+    getLandBoxTypes().forEach(bt => {
+        const qty = parseInt(store.form.boxTypeCounts[bt], 10) || 1;
+        const rate = selected[bt] || recommended[bt] || 0;
+        total += rate * qty;
+    });
+    return total;
+}
+
+export function applyLandFreightTotal() {
+    const total = Math.round(getLandFreightTotal() * 100) / 100;
+    const boxes = parseInt(store.form.boxes, 10) || 1;
+    store.feeData.land.baseFreight = total;
+    store.feeData.land.perBoxFee = boxes ? Math.round(total / boxes * 100) / 100 : 0;
+    return total;
+}
+
 // 欧盟/欧洲经济区自动启用 ICS2 费，固定70元
 export function autoEnableICS2ForEurope() {
     var destCountry = store.form.destCountry || '';

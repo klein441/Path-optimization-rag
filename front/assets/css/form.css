@@ -67,32 +67,29 @@
 
 /* 柜型数量输入行 */
 .box-qty-row{
-  display:flex;align-items:center;gap:0.6rem;padding:0.55rem 0.8rem;
+  display:grid;grid-template-columns:4rem 5rem 2.4rem 4.5rem;align-items:center;gap:0.45rem;padding:0.55rem 0.8rem;
   background:var(--surface-muted);border:1px solid var(--rule);border-radius:var(--radius-sm);
-  margin-bottom:0.4rem;flex-wrap:wrap;
+  margin-bottom:0.4rem;
 }
 .box-qty-type{
-  font-weight:600;font-size:0.85rem;color:var(--ink);min-width:4rem;font-family:var(--font-display);
+  min-width:0;font-weight:600;font-size:0.85rem;color:var(--ink);font-family:var(--font-display);
 }
 .box-qty-volume{
-  font-size:0.7rem;color:var(--muted);white-space:nowrap;font-family:var(--font-mono);
+  min-width:0;font-size:0.7rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;font-family:var(--font-mono);
 }
 .box-qty-label{
-  font-size:0.7rem;color:var(--muted-light);font-family:var(--font-mono);letter-spacing:0.05em;text-transform:uppercase;
+  min-width:0;font-size:0.7rem;color:var(--muted-light);text-align:right;font-family:var(--font-mono);letter-spacing:0.05em;text-transform:uppercase;
 }
 .box-qty-input{
-  width:5rem;padding:5px 8px;border:1px solid var(--rule-strong);border-radius:var(--radius-sm);
+  width:100%;min-width:0;padding:5px 8px;border:1px solid var(--rule-strong);border-radius:var(--radius-sm);
   font-size:0.85rem;text-align:center;font-family:var(--font-mono);
 }
 .box-qty-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(37,99,235,0.16)}
-.box-qty-subtotal{
-  font-weight:600;font-size:0.85rem;color:var(--accent);white-space:nowrap;min-width:5rem;text-align:right;font-family:var(--font-mono);
-}
 .box-qty-summary{
-  display:flex;align-items:center;justify-content:flex-end;gap:0.8rem;padding:0.4rem 0;
-  font-size:0.82rem;font-weight:600;color:var(--ink);
+  display:flex;align-items:baseline;justify-content:flex-end;gap:0.8rem;padding:0.4rem 0;
+  font-size:0.82rem;font-weight:600;color:var(--ink);white-space:nowrap;
 }
-.box-qty-summary span{color:var(--accent);font-family:var(--font-mono);font-size:0.9rem;}
+.box-qty-summary span{color:var(--accent);font-family:var(--font-mono);font-size:0.9rem;line-height:1}
 .product-size-container{
   display:flex;flex-direction:column;gap:0.4rem;margin-top:0.6rem;width:100%;
 }

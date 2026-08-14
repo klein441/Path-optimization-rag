@@ -18,7 +18,6 @@ export const store = reactive({
         gloveUnit: '千支',
         gloveQuantities: {},   // { "丁腈手套": { "M": 100, "L": 100 } }
         gloveQtyPanelOpen: false,
-        weightPerBox: 15,
         cargoReady: '',
         requiredArrival: '',
         urgent: false,
@@ -29,7 +28,7 @@ export const store = reactive({
         boxes: 1,
         volume: 0,
         volumeHint: '请先选择集装箱柜型',
-        weight: 15,
+        weight: 0,
     },
 
     // ===== 动态下拉数据 =====
@@ -55,6 +54,9 @@ export const store = reactive({
             selectedCarrier: null,  // 用户选择的承运商对象
             carriers: [],           // 全部匹配的承运商列表
             perBoxFee: 0,           // 推荐承运商的单柜费率
+            recommendedRatesByType: {},    // { "40HQ": 5000, "20GP": 4000 }
+            selectedRatesByType: {},       // 用户选择的各柜型单柜费率
+            selectedCarrierByType: {},     // 用户选择的各柜型承运商
             source: '',             // 数据来源
             totalMatched: 0,        // 匹配记录数
             loading: false,

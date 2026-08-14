@@ -2,7 +2,7 @@
  * 运输需求录入表单
  */
 import { store } from '../state.js';
-import { BOX_VOLUMES, PRODUCT_OPTIONS, BOX_TYPE_OPTIONS } from '../constants.js';
+import { BOX_VOLUMES, PRODUCT_OPTIONS, BOX_TYPE_OPTIONS, GLOVE_WEIGHT_KG_PER_THOUSAND, GLOVE_UNIT_TO_THOUSAND } from '../constants.js';
 import { initDateDefaults } from '../utils.js';
 import { apiGetCountries, apiGetDestPorts } from '../api.js';
 import { handleSubmit } from '../submit.js';
@@ -40,17 +40,34 @@ export default {
             });
             return Math.round(total);
         },
+        gloveWeightTotal() {
+            let total = 0;
+            const unitFactor = GLOVE_UNIT_TO_THOUSAND[this.store.form.gloveUnit] || 1;
+            Object.entries(this.store.form.gloveQuantities || {}).forEach(([p, sizes]) => {
+                if (!this.store.form.productTypes.includes(p)) return;
+                const selectedSizes = this.store.form.productSizes[p] || [];
+                const typeWeights = GLOVE_WEIGHT_KG_PER_THOUSAND[p] || {};
+                Object.entries(sizes || {}).forEach(([s, v]) => {
+                    if (!selectedSizes.includes(s)) return;
+                    const qty = parseFloat(v) || 0;
+                    if (qty <= 0) return;
+                    const kgPerThousand = typeWeights[s] || typeWeights.M || 0;
+                    total += qty * unitFactor * kgPerThousand;
+                });
+            });
+            return Math.round(total);
+        },
     },
     watch: {
         boxWatchKey() { this.syncBoxDerived(); },
-        'store.form.weightPerBox'() { this.syncWeight(); },
+        'store.form.gloveUnit'() { this.syncGloveQty(); },
         productWatchKey(joined) {
             const arr = joined ? joined.split(',') : [];
             const newSizes = {};
             const newQuantities = {};
             arr.forEach(p => {
                 const sizes = this.store.form.productSizes[p];
-                const selectedSizes = Array.isArray(sizes) ? sizes.slice() : ['M'];
+                const selectedSizes = Array.isArray(sizes) ? sizes.slice() : [];
                 newSizes[p] = selectedSizes;
                 const oldQty = store.form.gloveQuantities[p] || {};
                 const qty = {};
@@ -159,7 +176,7 @@ export default {
             } else if (idx >= 0) {
                 arr.splice(idx, 1);
             }
-            store.form.productSizes[p] = arr.length > 0 ? arr : ['M'];
+            store.form.productSizes[p] = arr;
             const qty = Object.assign({}, store.form.gloveQuantities[p] || {});
             if (e.target.checked && !(size in qty)) qty[size] = 0;
             store.form.gloveQuantities[p] = qty;
@@ -173,6 +190,7 @@ export default {
         },
         syncGloveQty() {
             store.form.gloveQty = this.gloveQtyTotal || 0;
+            this.syncWeight();
         },
         // ===== 柜型数量 =====
         onBoxQtyInput(bt, e) {
@@ -188,7 +206,7 @@ export default {
                 store.form.boxes = 1;
                 store.form.volume = 0;
                 store.form.volumeHint = '请先选择集装箱柜型';
-                store.form.weight = 15;
+                this.syncWeight();
                 return;
             }
             const totalBoxes = Object.values(newCounts).reduce((s, n) => s + n, 0);
@@ -199,12 +217,7 @@ export default {
             this.syncWeight();
         },
         syncWeight() {
-            const totalBoxes = parseInt(store.form.boxes) || 1;
-            const wpb = parseFloat(store.form.weightPerBox) || 15;
-            store.form.weight = Math.round(wpb * totalBoxes);
-        },
-        boxSubtotal(bt) {
-            return ((BOX_VOLUMES[bt] || 0) * (store.form.boxTypeCounts[bt] || 1)).toFixed(1);
+            store.form.weight = this.gloveWeightTotal;
         },
         boxTypeLabel(bt) {
             const opt = BOX_TYPE_OPTIONS.find(o => o.value === bt);
@@ -351,7 +364,6 @@ export default {
                   <span class="box-qty-volume">{{ BOX_VOLUMES[bt] }} m³/柜</span>
                   <span class="box-qty-label">数量:</span>
                   <input type="number" class="box-qty-input" :value="store.form.boxTypeCounts[bt] || 1" min="1" max="9999" step="1" @input="onBoxQtyInput(bt, $event)">
-                  <span class="box-qty-subtotal">{{ boxSubtotal(bt) }} m³</span>
                 </div>
                 <div class="box-qty-summary">
                   装柜总数: <span>{{ store.form.boxes }} 柜</span>
@@ -369,10 +381,10 @@ export default {
             </div>
 
             <div class="form-group">
-              <label class="form-label">单柜平均重量</label>
+              <label class="form-label">总重量</label>
               <div class="input-prefix">
-                <input type="number" class="form-input" id="weightPerBox" min="0" step="0.1" style="padding-right:2.5rem" v-model.number="store.form.weightPerBox">
-                <span class="unit">kg/柜</span>
+                <input type="number" class="form-input" id="weight" min="0" readonly style="padding-right:2.5rem;background:var(--rule-weak);color:var(--muted)" :value="store.form.weight">
+                <span class="unit">kg</span>
               </div>
             </div>
 
