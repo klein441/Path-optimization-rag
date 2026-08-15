@@ -2,8 +2,11 @@
 知识库 — 基于基础数据 + 配置默认值构建的物流知识库
 包含：工厂产能、港口映射（基于配置）、贸易条款、箱型信息、船公司知识、海运天数（地理估算）
 """
+import os
 import numpy as np
+import pandas as pd
 from data_loader import DataLoader
+import config
 from config import FACTORY_SHORT, FACTORY_REGION, NORTH_AMERICA, FDA_COUNTRIES, BOX_TYPE_VOLUME
 
 
@@ -135,12 +138,30 @@ class KnowledgeBase:
                 if default_port:
                     self.factory_ports[factory] = [{"port": default_port, "count": 0}]
 
-        # 运抵国 -> 目的港映射（空，由 app.py 的 /api/dest-ports 接口实时查询 运抵国与目的港.xlsx）
+        # 运抵国 -> 目的港映射（来自 运抵国与目的港.xlsx，按运单数降序）
         self.country_dest_ports = {}
         self.country_origin_ports = {}
         self.country_trade_terms = {}
         self.all_countries = []
         self.all_origin_ports = []
+        fpath = config.COUNTRY_DEST_PORT_FILE
+        if os.path.exists(fpath):
+            try:
+                df = pd.read_excel(fpath, sheet_name=0)
+                for country, grp in df.groupby("运抵国"):
+                    rows = grp.sort_values("运单数", ascending=False)
+                    ports = []
+                    for _, r in rows.iterrows():
+                        try:
+                            cnt = int(float(r.get("运单数", 0) or 0))
+                        except (TypeError, ValueError):
+                            cnt = 0
+                        ports.append({"port": str(r["目的港"]).strip(), "count": cnt})
+                    self.country_dest_ports[str(country).strip()] = ports
+                self.all_countries = sorted(self.country_dest_ports.keys())
+                print(f"[知识库] 运抵国与目的港: {len(self.all_countries)} 个国家")
+            except Exception as e:
+                print(f"[知识库] 运抵国与目的港加载失败: {e}")
 
     # ===== 贸易条款 =====
     def _build_trade_terms(self):

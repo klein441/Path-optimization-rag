@@ -214,3 +214,33 @@ export async function fetchLandFreightFromRoute(factoryName, originPort, transpo
         ld.loading = false;
     }
 }
+
+// ===== 自适应 Agentic RAG：对话式推荐/问答 =====
+export async function apiChat(message, form, sessionId) {
+    const resp = await fetch(API_BASE + '/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message, form: form || {}, sessionId: sessionId || '' }),
+    });
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || 'HTTP ' + resp.status);
+    return data.data;
+}
+
+// ===== 自适应 Agentic RAG：知识库混合检索 =====
+export async function apiSearch(query, topK) {
+    const resp = await fetch(API_BASE + '/api/kb/search?q=' + encodeURIComponent(query) + '&top_k=' + (topK || 8));
+    const data = await resp.json();
+    if (!data.success) throw new Error(data.error || 'HTTP ' + resp.status);
+    return data.data;
+}
+
+// ===== 自适应 Agentic RAG：用户反馈上报（确认/改选/费用修正）=====
+export async function apiFeedback(payload) {
+    const resp = await fetch(API_BASE + '/api/recommendation/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    return resp.json();
+}

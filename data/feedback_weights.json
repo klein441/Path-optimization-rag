@@ -1,0 +1,17 @@
+{
+  "max_id": 3,
+  "updated_at": "2026-08-14 09:26:51",
+  "route_adjust": {
+    "山东英科医疗制品有限公司||青岛/QINGDAO": {
+      "score_bonus": 2.0,
+      "delta_mean": 0.0,
+      "count": 1
+    }
+  },
+  "factory_boost": {
+    "山东英科医疗制品有限公司": 1.5
+  },
+  "port_boost": {
+    "青岛/QINGDAO": 1.5
+  }
+}

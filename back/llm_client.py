@@ -14,6 +14,7 @@ import time
 import requests
 import pandas as pd
 import numpy as np
+import config
 from datetime import datetime, timedelta
 from config import (
     LLM_API_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT, LLM_ENABLED,
@@ -780,6 +781,16 @@ class LLMClient:
                 "无法按客户约定时间到货，建议与客户确认延期或选择更早船期。"
             )
 
+        # 反馈闭环调权：FEEDBACK_AUTO_APPLY=true 时按用户反馈调整评分/费用（在排序前注入）
+        if config.FEEDBACK_AUTO_APPLY:
+            try:
+                from feedback_weights import get_feedback_weights
+                fw = get_feedback_weights()
+                if fw.enabled:
+                    fw.adjust_candidates(candidates)
+            except Exception as e:
+                print(f"[反馈调权] 应用失败: {e}")
+
         if urgent or self._cannot_meet_arrival:
             # 条例2：按时效升序排列，时效相同再按评分降序
             candidates.sort(key=lambda x: (x["timeline"]["total_days"], -x["score"]))
@@ -1200,6 +1211,20 @@ class LLMClient:
         # 知识库摘要
         kb_summary = self.kb.get_summary()
 
+        # 检索知识（RAG）：按需注入相关知识，避免 prompt 随知识膨胀
+        retrieval_section = ""
+        try:
+            from retriever import get_retriever
+            retrieval_text = get_retriever().retrieve_text(
+                query=f"{product} {country} {dest_port} 物流 推荐",
+                input_data=input_data,
+                profile={"top_k": 6, "use_rerank": True},
+            )
+            if retrieval_text:
+                retrieval_section = f"## 检索到的相关知识（引用）\n{retrieval_text}\n\n"
+        except Exception as _e:
+            print(f"[RAG] 检索上下文注入失败: {_e}")
+
         # 候选方案信息（所有 工厂×始发港×目的港 路线，按评分排序，取前8给LLM）
         candidate_info = []
         for i, c in enumerate(candidates[:8]):
@@ -1263,7 +1288,7 @@ class LLMClient:
 - 平均总费用：{data_stats.get('avg_cost', {})}
 - 费用明细中位数：{data_stats.get('fee_breakdown', {})}
 
-## 候选方案
+{retrieval_section}## 候选方案
 {''.join(candidate_info)}
 
 ## 请输出JSON格式的推荐结果
@@ -1285,6 +1310,150 @@ class LLMClient:
 请综合考虑：产能匹配度、运输成本、时效性、路线成熟度、贸易条款合理性。"""
 
         return prompt
+
+    # ===== 对比推荐（compare 意图）：按问题中的港口/工厂做真对比 =====
+    def _detect_compare_subjects(self, message):
+        """从问题文本中识别对比对象：起运港 / 工厂"""
+        message = str(message or "")
+        subjects = []
+        for cn in DOMESTIC_ORIGIN_PORTS:
+            if cn and cn in message:
+                subjects.append({"type": "origin_port", "label": cn, "match": cn})
+        for name, info in self.kb.factory_info.items():
+            short = info.get("short_name", "")
+            if name and name in message:
+                subjects.append({"type": "factory", "label": name, "match": name})
+            elif short and short in message:
+                subjects.append({"type": "factory", "label": name, "match": short})
+        return subjects
+
+    def _candidate_to_primary(self, c, input_data):
+        return {
+            "factory": c["factory"], "factory_short": c["factory_short"], "region": c["region"],
+            "departurePort": c["origin_port"], "originPortCn": c.get("origin_port_cn", c["origin_port"]),
+            "destPort": c["dest_port"], "tradeTerm": c["trade_term"],
+            "tradeTermInfo": self.kb.trade_terms.get(c["trade_term"], {}),
+            "boxType": c["box_type"], "boxTypes": c["cost"].get("box_types", [c["box_type"]]),
+            "boxTypeCounts": c["cost"].get("box_type_counts", {c["box_type"]: 1}),
+            "boxCount": c["cost"].get("box_count", 1),
+            "cost": c["cost"], "timeline": c["timeline"], "factoryInfo": c.get("factory_info", {}),
+            "carrier": c.get("carrier", {}), "shippingLine": c.get("shipping_line", {}),
+            "shippingLines": c.get("shipping_lines", {}), "oceanFreightInfo": c.get("ocean_freight_info", {}),
+            "score": c["score"], "pricingSource": c.get("pricing_source", "rule_engine"),
+            "dataQuality": c.get("data_quality", "medium"),
+            "needFDA": input_data.get("destCountry") in FDA_COUNTRIES,
+        }
+
+    def _candidate_to_alt(self, c, input_data):
+        return {
+            "factory": c["factory"], "factory_short": c["factory_short"], "region": c["region"],
+            "departurePort": c["origin_port"], "originPortCn": c.get("origin_port_cn", c["origin_port"]),
+            "destPort": c["dest_port"], "tradeTerm": c["trade_term"], "boxType": c["box_type"],
+            "cost": c["cost"], "timeline": c["timeline"], "carrier": c.get("carrier", {}),
+            "shippingLine": c.get("shipping_line", {}), "shippingLines": c.get("shipping_lines", {}),
+            "factoryInfo": c.get("factory_info", {}), "oceanFreightInfo": c.get("ocean_freight_info", {}),
+            "score": c["score"], "pricingSource": c.get("pricing_source", "rule_engine"),
+            "dataQuality": c.get("data_quality", "medium"),
+            "needFDA": input_data.get("destCountry") in FDA_COUNTRIES,
+        }
+
+    def _compare_recommend(self, input_data, candidates, message):
+        """对比推荐：问题中出现 >=2 个起运港/工厂时，按对象分别出最优方案并输出对比结论。
+
+        返回 None 表示无法对比（对象不足/无候选），由调用方回退到常规推荐。
+        """
+        subjects = self._detect_compare_subjects(message)
+        if len(subjects) < 2:
+            return None
+
+        rows = []
+        for s in subjects:
+            if s["type"] == "origin_port":
+                pool = [c for c in candidates
+                        if s["match"] in c.get("origin_port_cn", "")
+                        or s["match"] in c.get("origin_port", "")]
+            else:
+                pool = [c for c in candidates
+                        if c["factory"] == s["match"] or c.get("factory_short", "") == s["match"]]
+            if not pool:
+                continue
+            best = min(pool, key=lambda c: (c["cost"]["total_cny"], -c["score"]))
+            rows.append({"subject": s, "candidate": best})
+
+        if len(rows) < 2:
+            return None
+        # 含海运费合计成本：F 组条款（FOB/FCA/FAS）海运费由买方承担、不在 total_cny 中，
+        # 需叠加合约海运费（ocean_freight_info.rate_cny）；C/D 组条款已含海运费，不重复叠加。
+        for r in rows:
+            c = r["candidate"]
+            ocean = c.get("ocean_freight_info") or {}
+            try:
+                rate_usd = float(ocean.get("rate_usd", 0) or 0)
+                rate_cny = float(ocean.get("rate_cny", 0) or 0)
+            except (TypeError, ValueError):
+                rate_usd = rate_cny = 0.0
+            if not rate_cny and rate_usd:
+                rate_cny = round(rate_usd * USD_TO_CNY, 2)
+            r["_ocean_cny"] = rate_cny if c["trade_term"] in F_TERMS else 0.0
+            r["_total_incl"] = round(c["cost"]["total_cny"] + r["_ocean_cny"], 2)
+        rows.sort(key=lambda r: (r["_total_incl"], -r["candidate"]["score"]))
+        winner = rows[0]
+
+        compare_rows = []
+        for r in rows:
+            c = r["candidate"]
+            label = (r["subject"]["label"] + " 起运" if r["subject"]["type"] == "origin_port"
+                     else r["subject"]["label"] + " 工厂")
+            ocean = c.get("ocean_freight_info") or {}
+            try:
+                rate_usd = float(ocean.get("rate_usd", 0) or 0)
+                rate_cny = float(ocean.get("rate_cny", 0) or 0)
+            except (TypeError, ValueError):
+                rate_usd = rate_cny = 0.0
+            if not rate_cny and rate_usd:
+                rate_cny = round(rate_usd * USD_TO_CNY, 2)
+            compare_rows.append({
+                "subject": label,
+                "factory": c["factory_short"],
+                "origin_port": c.get("origin_port_cn", c["origin_port"]),
+                "dest_port": c["dest_port"],
+                "trade_term": c["trade_term"],
+                "total_cny": round(c["cost"]["total_cny"], 2),
+                "total_usd": c["cost"]["total_usd"],
+                "ocean_usd": rate_usd,
+                "ocean_cny": rate_cny,
+                "total_incl_ocean_cny": r["_total_incl"],
+                "days": c["timeline"]["total_days"],
+                "score": c["score"],
+                "shipping_line": (c.get("shipping_line") or {}).get("name", ""),
+            })
+
+        parts = []
+        dest_country = str(input_data.get("destCountry") or "").strip()
+        for r in compare_rows:
+            parts.append(f"{r['subject']}最优为{r['factory']}→{r['origin_port']}→{r['dest_port']}，"
+                         f"{r['trade_term']}费用{r['total_cny']}元，海运费{r['shipping_line']} "
+                         f"USD {r['ocean_usd']}/40HC（约{r['ocean_cny']}元），合计{r['total_incl_ocean_cny']}元，"
+                         f"时效{r['days']}天，评分{r['score']}")
+        best_r, second_r = compare_rows[0], compare_rows[1]
+        diff = round(second_r["total_incl_ocean_cny"] - best_r["total_incl_ocean_cny"], 2)
+        head = f"对比结果（出口{dest_country}）:\n" if dest_country else "对比结果:\n"
+        parts.append(f"含海运费合计成本，{best_r['subject']}更划算（比{second_r['subject']}低{diff}元）。"
+                     f"如需更快可权衡{second_r['subject']}方案（时效{second_r['days']}天）。")
+        reasoning = head + "\n".join(f"{i + 1}. {p}" for i, p in enumerate(parts))
+
+        result = self._rule_based_recommend(input_data, candidates)
+        result["primary"] = self._candidate_to_primary(winner["candidate"], input_data)
+        result["alternatives"] = [self._candidate_to_alt(r["candidate"], input_data) for r in rows[1:4]]
+        result["reasoning"] = reasoning
+        result["comparison"] = {
+            "subject_type": rows[0]["subject"]["type"],
+            "verdict": f"{best_r['subject']}更划算（含海运费合计成本）",
+            "cost_diff_cny": round(diff, 2),
+            "rows": compare_rows,
+        }
+        result["source"] = "compare"
+        return result
 
     def _call_llm(self, input_data, candidates):
         """调用LLM API"""
@@ -1413,6 +1582,55 @@ class LLMClient:
         result["llm_model"] = LLM_MODEL
 
         return result
+
+    def llm_structured_call(self, system_prompt, user_prompt, temperature=0.3, max_tokens=2000):
+        """通用 LLM 结构化调用：返回解析后的 dict，失败返回 None（含 JSON 解析容错）"""
+        if not LLM_ENABLED:
+            return None
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_API_KEY}",
+        }
+        payload = {
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            resp = requests.post(LLM_API_URL, json=payload, headers=headers, timeout=LLM_TIMEOUT)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            try:
+                return json.loads(content)
+            except Exception:
+                import re
+                match = re.search(r'\{.*\}', content, re.DOTALL)
+                if match:
+                    return json.loads(match.group())
+        except Exception as e:
+            print(f"[LLM] 结构化调用失败: {e}")
+        return None
+
+    def answer_query(self, message, context_text):
+        """知识问答（RAG QA）：基于检索上下文回答用户咨询类问题"""
+        system = "你是物流运输路径优化系统的知识助手，只能基于提供的检索内容回答，禁止编造事实。"
+        prompt = f"""用户问题：{message}
+
+## 检索到的知识
+{context_text[:6000]}
+
+请输出 JSON：{{"answer": "简洁中文回答（200字内）", "points": ["要点1", "要点2"]}}"""
+        res = self.llm_structured_call(system, prompt, temperature=0.2, max_tokens=1000)
+        if not res:
+            return {"answer": (context_text[:800] or "暂未检索到相关知识。"), "source": "rule"}
+        res["source"] = "llm"
+        return res
 
     def estimate_toll_fee(self, province, origin_port, box_count, box_types, weight, volume):
         """调用LLM估算工厂自运高速费

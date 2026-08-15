@@ -4,6 +4,7 @@
 from llm_client import LLMClient
 from knowledge_base import KnowledgeBase
 from cost_calculator import CostCalculator
+import config
 from config import LLM_ENABLED
 
 
@@ -28,6 +29,8 @@ class RecommendationEngine:
         self.kb.build()
         self.cost_calc = CostCalculator()
         self.llm_client = LLMClient()
+        self._retriever = None
+        self._executor = None
         self._initialized = True
 
     def recommend(self, input_data):
@@ -46,18 +49,23 @@ class RecommendationEngine:
             - tradePref: 贸易条款偏好 (auto/FOB/CIF/DDP/...)
         :return: 推荐结果字典
         """
-        # 调用LLM客户端（内含规则引擎降级逻辑）
-        result = self.llm_client.recommend(input_data)
+        # 自适应 Agentic RAG 编排（含查询路由/检索增强/反思校验）
+        if config.RAG_ENABLED and config.AGENT_ENABLED:
+            result = self.executor.run(input_data=input_data)
+            result.setdefault("engine", "adaptive_agentic_rag")
+        else:
+            # 原有流程：规则引擎 + 单次 LLM（降级兼容）
+            result = self.llm_client.recommend(input_data)
+            result.setdefault("engine", "data_driven_v3")
 
         # 添加引擎元信息
-        result["engine"] = "data_driven_v3"
-        result["data_sources"] = [
+        result.setdefault("data_sources", [
             "工厂分配区间规则",
             "海运费参考标准",
             "港杂费标准_贸易条款承运商箱型港口",
             "工厂到起运港拖车费",
             "运抵国与目的港",
-        ]
+        ])
         result["llm_enabled"] = LLM_ENABLED
 
         return result
@@ -86,3 +94,42 @@ class RecommendationEngine:
     def get_kb_summary(self):
         """获取知识库摘要"""
         return self.kb.get_summary()
+
+    # ===== 自适应 Agentic RAG =====
+    @property
+    def retriever(self):
+        """混合检索器（惰性构建）"""
+        if self._retriever is None:
+            from retriever import get_retriever
+            self._retriever = get_retriever()
+        return self._retriever
+
+    @property
+    def executor(self):
+        """Agent 执行器（惰性构建，复用引擎的 LLM 客户端）"""
+        if self._executor is None:
+            from agent.executor import get_executor
+            self._executor = get_executor(llm_client=self.llm_client)
+        return self._executor
+
+    def search_kb(self, query, top_k=8):
+        """知识检索接口（供 /api/kb/search 与调试使用）"""
+        results = self.retriever.retrieve(query=query, top_k=top_k)
+        return {"query": query, "count": len(results), "results": results}
+
+    def kb_stats(self):
+        """检索库统计（供 /api/kb/stats）"""
+        return self.retriever.store.stats()
+
+    def rebuild_kb(self):
+        """强制重建检索索引（供 /api/kb/rebuild）"""
+        self.retriever.store.build(force=True)
+        return self.kb_stats()
+
+    def chat(self, message, input_data=None, session_id=None):
+        """对话式推荐/问答（供 /api/chat 使用）"""
+        return self.executor.run(
+            input_data=input_data or {},
+            message=message,
+            session_id=session_id,
+        )

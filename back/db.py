@@ -87,6 +87,20 @@ def init_db():
                     UNIQUE KEY uk_username (username)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS recommendation_feedback (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    log_id BIGINT UNSIGNED NULL,
+                    user_action VARCHAR(32) NOT NULL,
+                    chosen_factory VARCHAR(255) NULL,
+                    chosen_port VARCHAR(255) NULL,
+                    delta_cost DECIMAL(18,2) NULL,
+                    note VARCHAR(512) NULL,
+                    PRIMARY KEY (id),
+                    KEY idx_log_id (log_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
             cursor.execute("SELECT id FROM logistics_users WHERE username = %s", ("admin",))
             if not cursor.fetchone():
                 cursor.execute(
@@ -145,7 +159,8 @@ def save_recommendation(input_data, result):
     if not DB_ENABLED:
         return False
 
-    primary = result.get("data", {}).get("primary", {}) if isinstance(result, dict) else {}
+    payload = result.get("data", {}) if isinstance(result, dict) and isinstance(result.get("data"), dict) else result
+    primary = payload.get("primary", {}) if isinstance(payload, dict) else {}
     cost = primary.get("cost", {})
     timeline = primary.get("timeline", {})
     score = primary.get("score")
@@ -172,7 +187,8 @@ def save_recommendation(input_data, result):
                     score,
                 ),
             )
-        return True
+            new_id = cursor.lastrowid
+        return new_id
     finally:
         conn.close()
 
@@ -259,11 +275,94 @@ def safe_init_db():
 
 
 def safe_save_recommendation(input_data, result):
-    """保存推荐结果，失败只记录日志不影响接口"""
+    """保存推荐结果，失败只记录日志不影响接口；成功返回 log_id"""
     if not DB_ENABLED:
-        return
+        return None
     try:
-        save_recommendation(input_data, result)
-        print(f"[MySQL] 推荐结果已保存: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        log_id = save_recommendation(input_data, result)
+        print(f"[MySQL] 推荐结果已保存: log_id={log_id} {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        return log_id
     except Exception as e:
         print(f"[MySQL] 保存推荐结果失败: {e}")
+        return None
+
+
+def save_feedback(log_id, user_action, chosen_factory=None, chosen_port=None, delta_cost=None, note=None):
+    """保存用户反馈（确认/改选/费用修正），用于自适应学习"""
+    if not DB_ENABLED:
+        return False
+    if user_action not in ("confirm", "modify", "switch_alternative"):
+        user_action = "note"
+    conn = _connect()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO recommendation_feedback (
+                    log_id, user_action, chosen_factory, chosen_port, delta_cost, note
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (log_id, user_action, chosen_factory, chosen_port,
+                 round(float(delta_cost), 2) if delta_cost is not None else None, note),
+            )
+        return True
+    finally:
+        conn.close()
+
+
+def safe_save_feedback(log_id, user_action, chosen_factory=None, chosen_port=None, delta_cost=None, note=None):
+    """保存反馈，失败不阻断主流程"""
+    if not DB_ENABLED:
+        return False
+    try:
+        ok = save_feedback(log_id, user_action, chosen_factory, chosen_port, delta_cost, note)
+        print(f"[MySQL] 反馈已保存: action={user_action} log_id={log_id}")
+        return ok
+    except Exception as e:
+        print(f"[MySQL] 保存反馈失败: {e}")
+        return False
+
+
+def fetch_feedback_rows(limit=5000):
+    """读取反馈并关联推荐日志（用于反馈调权），失败返回空列表"""
+    if not DB_ENABLED:
+        return []
+    try:
+        conn = _connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT f.id, f.log_id, f.user_action, f.chosen_factory, f.chosen_port,
+                           f.delta_cost, f.note,
+                           l.primary_factory, l.primary_origin_port
+                    FROM recommendation_feedback f
+                    LEFT JOIN logistics_recommendation_log l ON f.log_id = l.id
+                    ORDER BY f.id ASC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                return cursor.fetchall()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[MySQL] 读取反馈失败: {e}")
+        return []
+
+
+def get_feedback_max_id():
+    """反馈表最大 id（用于缓存增量判断）"""
+    if not DB_ENABLED:
+        return 0
+    try:
+        conn = _connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT COALESCE(MAX(id), 0) AS m FROM recommendation_feedback")
+                row = cursor.fetchone()
+                return int(row["m"] or 0)
+        finally:
+            conn.close()
+    except Exception:
+        return 0

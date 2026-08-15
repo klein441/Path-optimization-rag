@@ -24,6 +24,7 @@ export default {
           </div>
         </div>
         <div class="header-right">
+          <a class="rag-entry-link" href="/rag">智能问答</a>
           <div class="status-dot">系统正常运行</div>
         </div>
         <button type="button" class="logout-btn" @click="logout">

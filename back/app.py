@@ -78,6 +78,12 @@ def app_page():
     return app.send_static_file('logistics-optimizer.html')
 
 
+@app.route('/rag')
+def rag_page():
+    """RAG 智能问答页"""
+    return app.send_static_file('rag.html')
+
+
 def get_engine():
     global engine
     if engine is None:
@@ -365,6 +371,10 @@ def recommend():
                 'selectedOriginPorts': result.get('selectedOriginPorts', []),
                 'totalRoutes': len(result.get('allCandidates', [])),
                 'dataSources': result.get('data_sources', []),
+                'citations': result.get('citations', []),
+                'agentTrace': result.get('agent_trace', []),
+                'retrievalUsed': result.get('retrieval_used', False),
+                'route': result.get('route', {}),
                 'generatedAt': result.get('generatedAt', datetime.now().isoformat()),
             }
         }
@@ -375,6 +385,115 @@ def recommend():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'推荐生成失败: {str(e)}'}), 500
+
+
+@app.route('/api/chat', methods=['POST'])
+def chat_api():
+    """对话式推荐/问答 — 自适应 Agentic RAG 入口
+
+    Body: {
+        "message": "用户消息（必填）",
+        "sessionId": "会话ID（可选，用于 follow_up 判定）",
+        "form": { ...标准推荐表单字段，可选... }
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
+    if not message:
+        return jsonify({'success': False, 'error': '缺少 message 参数'}), 400
+
+    try:
+        eng = get_engine()
+        result = eng.chat(
+            message=message,
+            input_data=data.get('form') or {},
+            session_id=data.get('sessionId') or '',
+        )
+        # 反馈闭环：推荐成功时落库并返回 logId，前端可据此提交确认/改选反馈
+        if result.get("primary"):
+            log_id = db.safe_save_recommendation(data.get('form') or {}, result)
+            if log_id:
+                result["logId"] = log_id
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f'对话处理失败: {str(e)}'}), 500
+
+
+@app.route('/api/kb/search', methods=['GET'])
+def kb_search_api():
+    """知识库混合检索（调试/对话引用溯源）"""
+    query = (request.args.get('q') or request.args.get('query') or '').strip()
+    top_k = int(request.args.get('top_k') or 8)
+    if not query:
+        return jsonify({'success': False, 'error': '缺少 q 参数'}), 400
+    try:
+        eng = get_engine()
+        result = eng.search_kb(query, top_k=top_k)
+        return jsonify({'success': True, 'data': result})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f'检索失败: {str(e)}'}), 500
+
+
+@app.route('/api/kb/stats', methods=['GET'])
+def kb_stats_api():
+    """检索库统计信息（chunks/embedding/来源）"""
+    try:
+        eng = get_engine()
+        return jsonify({'success': True, 'data': eng.kb_stats()})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f'获取统计失败: {str(e)}'}), 500
+
+
+@app.route('/api/kb/rebuild', methods=['POST'])
+def kb_rebuild_api():
+    """强制重建检索索引（Excel 数据变更后使用）"""
+    try:
+        eng = get_engine()
+        stats = eng.rebuild_kb()
+        return jsonify({'success': True, 'data': stats})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f'重建索引失败: {str(e)}'}), 500
+
+
+@app.route('/api/recommendation/feedback', methods=['POST'])
+def recommendation_feedback_api():
+    """记录用户反馈（确认/改选/费用修正），用于自适应学习
+
+    Body: {
+        "logId": 123, "action": "confirm|modify|switch_alternative",
+        "chosenFactory": "...", "chosenPort": "...", "deltaCost": 100, "note": "..."
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    action = data.get('action') or 'note'
+    ok = db.safe_save_feedback(
+        log_id=data.get('logId'),
+        user_action=action,
+        chosen_factory=data.get('chosenFactory'),
+        chosen_port=data.get('chosenPort'),
+        delta_cost=data.get('deltaCost'),
+        note=data.get('note'),
+    )
+    return jsonify({'success': True, 'data': {'saved': ok}})
+
+
+@app.route('/api/recommendation/feedback-weights', methods=['GET'])
+def feedback_weights_api():
+    """查看当前反馈调权（工厂/港口/路由加分与费用修正）"""
+    try:
+        from feedback_weights import load_weights
+        fw = load_weights()
+        return jsonify({'success': True, 'data': fw.to_dict()})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'读取调权失败: {e}'}), 500
 
 
 @app.route('/api/recommendation/confirm', methods=['POST'])

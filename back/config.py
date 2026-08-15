@@ -119,13 +119,14 @@ CONTRACT_BOX_UNIT = {
 
 # ===== 集装箱箱型标准容量（CBM） =====
 BOX_TYPE_VOLUME = {
-    "20GP": 33.1,
-    "40GP": 67.5,
-    "40HQ": 76.0,
-    "40HC": 76.0,
-    "40NOR": 67.5,
-    "45HQ": 85.0,
-    "20HQ": 33.1,
+    # 以《集装箱标准容积对照表.xlsx》为准（ISO 668 及 OOCL/中远海运规格）
+    "20GP": 33.2,
+    "40GP": 67.7,
+    "40HQ": 76.4,
+    "40HC": 76.4,
+    "40NOR": 67.3,
+    "45HQ": 86.1,
+    "20HQ": 37.5,
     "LCL": 0,  # 拼箱无固定容量
 }
 
@@ -139,6 +140,9 @@ COUNTRY_DEST_PORT_FILE = os.path.join(DATA_DIR, "运抵国与目的港.xlsx")
 
 # 工厂分配区间规则 — 发货工厂选择的依据（表格箱数 = 千支）
 FACTORY_ALLOCATION_FILE = os.path.join(DATA_DIR, "工厂分配区间规则.xlsx")
+
+# 分析报告目录（data/report）— docx/html 报告文档，作为报告类检索知识源
+REPORT_DIR = os.path.join(DATA_DIR, "report")
 
 # ===== 国内始发港（11个）用于海运费比价选出最优5港 =====
 # 中文名 → 标准格式（中文/英文），用于合约匹配和费用计算
@@ -169,3 +173,48 @@ FACTORY_ALLOCATION_NAME_MAP = {
     "张店PE": "山东英科医疗科技有限公司",
     "广宁PE": "BASIC INTERNATIONAL VIET NAM CO..LTD",
 }
+
+# ===== 自适应 Agentic RAG 配置 =====
+# 总开关：关闭后完全走原有“规则引擎 + 单次LLM”流程
+RAG_ENABLED = os.environ.get("RAG_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+# 语义向量开关：开启后使用本地 sentence-transformers 模型做 embedding（首次加载较慢）
+# 关闭时向量检索回退到字符 n-gram 哈希相似度（纯词法），保证无重依赖可用
+RAG_EMBEDDING_ENABLED = os.environ.get("RAG_EMBEDDING_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
+# 哈希回退向量的维度（仅 RAG_EMBEDDING_ENABLED=false 时生效）
+EMBEDDING_HASH_DIM = int(os.environ.get("EMBEDDING_HASH_DIM", "512"))
+
+# ===== 检索配置 =====
+RETRIEVAL_TOP_K = int(os.environ.get("RETRIEVAL_TOP_K", "8"))
+RETRIEVAL_MAX_K = int(os.environ.get("RETRIEVAL_MAX_K", "16"))
+RERANK_ENABLED = os.environ.get("RERANK_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+# 查询扩展：命中率低时自动做同义词/翻译扩展
+QUERY_EXPANSION_ENABLED = os.environ.get("QUERY_EXPANSION_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+
+# ===== Agent 配置 =====
+AGENT_ENABLED = os.environ.get("AGENT_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+# 简单查询走快速路径（规则+检索），复杂查询才启动多步 Agent
+AGENT_FASTPATH_ENABLED = os.environ.get("AGENT_FASTPATH_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+# 工具调用步数上限（多轮恢复/compare/exception 会用到；提高可支持更深的多轮检索）
+AGENT_MAX_STEPS = int(os.environ.get("AGENT_MAX_STEPS", "8"))
+
+# ===== 证据评分与多轮检索收敛配置 =====
+# 证据覆盖率 / 置信度低于阈值时，结果标记 needs_review（需人工复核）
+EVIDENCE_TARGET_COVERAGE = float(os.environ.get("EVIDENCE_TARGET_COVERAGE", "0.6"))
+EVIDENCE_MIN_CONFIDENCE = float(os.environ.get("EVIDENCE_MIN_CONFIDENCE", "0.5"))
+# 多轮检索收敛：每轮证据分数提升低于该值则停止继续检索
+EVIDENCE_CONVERGE_EPS = float(os.environ.get("EVIDENCE_CONVERGE_EPS", "0.03"))
+
+# ===== 反馈学习配置 =====
+# 是否自动把用户反馈应用为评分权重（默认 false：只记录，人工审核后再应用）
+FEEDBACK_AUTO_APPLY = os.environ.get("FEEDBACK_AUTO_APPLY", "false").strip().lower() in ("1", "true", "yes")
+
+# ===== 会话记忆配置 =====
+SESSION_TTL = int(os.environ.get("SESSION_TTL", "1800"))        # 会话上下文保留秒数
+SESSION_MAX_TURNS = int(os.environ.get("SESSION_MAX_TURNS", "10"))  # 每会话最多保留轮数
+
+# ===== LLM 路由配置 =====
+# 关键词无法确定意图（意图为 None / follow_up）时，调用 LLM 做意图分类（LLM 未启用时自动回退关键词）
+LLM_ROUTING_ENABLED = os.environ.get("LLM_ROUTING_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+# 反馈调权缓存文件（离线脚本计算后写入，运行时加载）
+FEEDBACK_WEIGHTS_CACHE = os.path.join(DATA_DIR, "feedback_weights.json")

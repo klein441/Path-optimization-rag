@@ -1,0 +1,266 @@
+{
+  "meta": {
+    "description": "自适应 Agentic RAG 四指标评测黄金测试集（Context Recall / Context Precision / Faithfulness / Answer Relevance）",
+    "created": "2026-08-14",
+    "retrieval_top_k_note": "按路由画像决定：qa 路径 top_k=10，其他按 profile.top_k（low=6/medium=8/high=14）",
+    "gold_facts_note": "gold_facts 为参考标准答案的原子事实，必须能作为子串出现在知识库/报告中，才能衡量检索是否把它们找出来"
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "type": "consult",
+      "question": "哪些工厂生产丁腈手套？",
+      "form": {},
+      "gold_answer": "安庆英科医疗有限公司、安徽英科医疗用品有限公司、山东英科医疗制品有限公司、江西英科医疗有限公司，以及海外越南清化、印尼基地。",
+      "gold_facts": [
+        "安庆英科",
+        "安徽英科",
+        "山东英科",
+        "江西英科",
+        "越南清化",
+        "印尼"
+      ],
+      "expected_entities": [
+        "安庆英科",
+        "安徽英科",
+        "山东英科",
+        "江西英科",
+        "丁腈手套"
+      ],
+      "context_terms": [
+        "丁腈手套",
+        "英科"
+      ],
+      "note": "知识咨询：工厂-产品映射"
+    },
+    {
+      "id": "q02",
+      "type": "constant",
+      "question": "40HQ集装箱的标准容积是多少？",
+      "form": {},
+      "gold_answer": "40HQ（40HC）高柜标准容积 76.4 m³（以《集装箱标准容积对照表》为统一口径）。",
+      "gold_facts": [
+        "40HQ",
+        "76.4",
+        "CBM"
+      ],
+      "expected_entities": [
+        "40HQ",
+        "容积",
+        "CBM"
+      ],
+      "context_terms": [
+        "40HQ",
+        "容积",
+        "箱型",
+        "CBM",
+        "高柜"
+      ],
+      "note": "常量查询：箱型标准容积"
+    },
+    {
+      "id": "q03",
+      "type": "consult",
+      "question": "从中国到美国海运大概要多少天？",
+      "form": {},
+      "gold_answer": "美国西海岸约 14~15 天、美国东海岸约 27~30 天，视船公司航线而定。",
+      "gold_facts": [
+        "美国西海岸",
+        "美国东海岸",
+        "船公司",
+        "航程"
+      ],
+      "expected_entities": [
+        "美国",
+        "海运",
+        "天"
+      ],
+      "context_terms": [
+        "美国",
+        "船公司",
+        "航程",
+        "海运"
+      ],
+      "note": "知识咨询：海运时效（依赖船公司航程知识）"
+    },
+    {
+      "id": "q04",
+      "type": "report",
+      "question": "海铁联运比直拖能省多少钱？",
+      "form": {},
+      "gold_answer": "长距离路线（如安徽英科→上海/宁波、江西英科→上海）改海铁可节省 200~3350 CNY/柜；短距离或成熟路线海铁无优势。",
+      "gold_facts": [
+        "200~3350",
+        "海铁",
+        "直拖",
+        "节省"
+      ],
+      "expected_entities": [
+        "海铁",
+        "直拖",
+        "节省",
+        "CNY"
+      ],
+      "context_terms": [
+        "海铁",
+        "直拖",
+        "节省",
+        "运输方式",
+        "成本"
+      ],
+      "note": "报告结论：data/report 港口及运输方式对比分析"
+    },
+    {
+      "id": "q05",
+      "type": "term",
+      "question": "解释一下FOB和DDP贸易条款",
+      "form": {},
+      "gold_answer": "FOB 卖方负责越过船舷前费用与风险、买方承担海运及目的港费用；DDP 卖方承担运至买方指定地点的全部费用含关税。",
+      "gold_facts": [
+        "FOB",
+        "DDP",
+        "买方承担海运及目的港费用",
+        "全程费用含关税"
+      ],
+      "expected_entities": [
+        "FOB",
+        "DDP",
+        "贸易条款"
+      ],
+      "context_terms": [
+        "FOB",
+        "DDP",
+        "贸易条款",
+        "卖方",
+        "买方"
+      ],
+      "note": "术语知识：贸易条款含义（kb.trade_terms 分块）"
+    },
+    {
+      "id": "q06",
+      "type": "recommend",
+      "question": "1万支丁腈手套发到洛杉矶，最划算怎么走？",
+      "form": {
+        "productType": "丁腈手套",
+        "destCountry": "美国",
+        "destPort": "洛杉矶/LOS ANGELES",
+        "gloveQty": 10,
+        "gloveUnit": "千支"
+      },
+      "gold_answer": "丁腈手套从候选工厂（安徽英科/江西英科/山东英科）经青岛或上海等起运港发洛杉矶，海运费最低 MSC USD 2102/40HC。",
+      "gold_facts": [
+        "丁腈手套",
+        "洛杉矶",
+        "美国",
+        "青岛",
+        "上海",
+        "MSC"
+      ],
+      "expected_entities": [
+        "丁腈手套",
+        "洛杉矶",
+        "美国"
+      ],
+      "context_terms": [
+        "丁腈手套",
+        "洛杉矶",
+        "美国",
+        "MSC",
+        "海运费",
+        "英科"
+      ],
+      "note": "自然语言推荐：工厂×港口×海运费 结构化+报告知识"
+    },
+    {
+      "id": "q07",
+      "type": "urgent",
+      "question": "赶船期，从中国发美国最快多久能到？",
+      "form": {
+        "productType": "丁腈手套",
+        "destCountry": "美国",
+        "destPort": "洛杉矶/LOS ANGELES",
+        "gloveQty": 10,
+        "gloveUnit": "千支"
+      },
+      "gold_answer": "美国西海岸海运最快约 14 天（MSC/马士基/达飞等），整条链路约 21~23 天。",
+      "gold_facts": [
+        "美国",
+        "船公司",
+        "14天"
+      ],
+      "expected_entities": [
+        "美国",
+        "海运",
+        "天",
+        "最快"
+      ],
+      "context_terms": [
+        "美国",
+        "船公司",
+        "航程",
+        "时效",
+        "最快"
+      ],
+      "note": "加急场景：结构化船公司航程 + 候选路线时效"
+    },
+    {
+      "id": "q08",
+      "type": "compare",
+      "question": "对比上海和宁波，出口美国哪个起运港更划算？",
+      "form": {
+        "productType": "丁腈手套",
+        "destCountry": "美国",
+        "destPort": "洛杉矶/LOS ANGELES",
+        "gloveQty": 10,
+        "gloveUnit": "千支",
+        "transportPref": "cost"
+      },
+      "gold_answer": "上海到洛杉矶海运费最低 MSC USD 2102/40HC，宁波 OOCL USD 2769，上海更划算；需结合拖车费综合比较。",
+      "gold_facts": [
+        "上海",
+        "宁波",
+        "美国",
+        "2102"
+      ],
+      "expected_entities": [
+        "上海",
+        "宁波",
+        "美国"
+      ],
+      "context_terms": [
+        "上海",
+        "宁波",
+        "美国",
+        "港口",
+        "海运费",
+        "划算"
+      ],
+      "note": "对比分析：港口比价（海运费参考标准 + 报告）"
+    },
+    {
+      "id": "q09",
+      "type": "exception",
+      "question": "为什么有时候查不到某条路线的海运费报价？",
+      "form": {},
+      "gold_answer": "原因包括：部分港口/航线无合约报价记录（如连云港/南京/厦门等）、订单-提单-集装箱匹配缺失、数据质量与覆盖范围限制，需结合实时报价与数据治理。",
+      "gold_facts": [
+        "数据质量",
+        "匹配",
+        "合约报价"
+      ],
+      "expected_entities": [
+        "报价",
+        "数据",
+        "匹配"
+      ],
+      "context_terms": [
+        "报价",
+        "数据质量",
+        "匹配",
+        "海运费",
+        "合约"
+      ],
+      "note": "异常解释：数据缺口与质量（报告数据治理结论）"
+    }
+  ]
+}
